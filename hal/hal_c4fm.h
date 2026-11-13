@@ -16,6 +16,18 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// The driver's counters (diagnostics, the debug link's c4fm.drv_* keys)
+typedef struct {
+	uint32_t keyups;	// transmissions started
+	uint32_t slots;		// transmit slots (the modem's own framing, any length) while keyed
+	uint32_t sent;		// slots filled from the stream
+	uint32_t idle;		// slots (partly) filled with idle: the stream ran dry while keyed
+	uint32_t stalls;	// the slot clock stopped while keyed: the PA dropped
+	uint32_t ints[3];	// board-specific interrupt counts
+	uint32_t level_pct;	// transmit modulation level, the board's own unit
+	uint32_t regs[2];	// board-specific register values (bench)
+} hal_c4fm_stats_t;
+
 typedef struct {
 	// Receive
 	uint32_t rx_rate_hz;
@@ -37,6 +49,8 @@ typedef struct {
 
 	// Optional, bench: the transmit deviation in percent of the board's C4FM default (100); NULL when fixed
 	void (*set_tx_level)(uint8_t percent);
+	// Optional, diagnostics: the driver's counters; NULL = none
+	void (*stats)(hal_c4fm_stats_t *out);
 } hal_c4fm_t;
 
 #endif

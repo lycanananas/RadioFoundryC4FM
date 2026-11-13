@@ -56,6 +56,9 @@ extern const hal_dmr_modem_t hrc_dmr;
 void hrc_c4fm_enter(void);
 void hrc_c4fm_leave(void);
 extern const hal_c4fm_t hrc_c4fm;
+// Bench: the transmit modulation level in percent of DMR's (139 default), set (1-255) from the next key-up; set <= 0
+// only reads it
+uint8_t hrc_c4fm_level(int16_t set);
 #endif
 
 // Bring-up counters: lines of at most about 20 characters, and the reset

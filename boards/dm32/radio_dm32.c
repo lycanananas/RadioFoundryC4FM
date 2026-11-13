@@ -767,6 +767,15 @@ bool dm32_chip_reg(uint8_t chip, uint8_t page, uint8_t reg, uint32_t *val, bool 
 	// Chip 1 (C4FM bench, docs/spec/c4fm.md): the HR_C7000's modem registers, offset page << 8 | reg (word aligned,
 	// up to 0x7FC), read or written straight: the C4FM deviation (RF_MOD_BIAS_CTRL 0x114), the FM receive chain
 	// (FM_BANDWIDTH 0x500), the AF gain (RF_MODE 0x104)
+	// Chip 2, register 0: the C4FM transmit level, percent of DMR's modulation (139 = +-2700 Hz if DMR is at
+	// +-1944 Hz), applied from the next key-up
+	if (chip == 2) {
+		if (page != 0 || reg != 0 || (write && (*val == 0 || *val > 255u))) {
+			return false;
+		}
+		*val = hrc_c4fm_level(write ? (int16_t)*val : 0);
+		return true;
+	}
 	if (chip == 1) {
 		uint32_t off = ((uint32_t)page << 8) | reg;
 		if ((off & 3u) != 0 || off > 0x7FCu) {

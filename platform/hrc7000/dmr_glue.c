@@ -347,14 +347,35 @@ static bool c4fm_tx_write(const uint8_t *b, uint16_t n) { return eng.c4fm != NUL
 static void c4fm_tx_stop(void) { hrc7000_c4fm_tx_stop(&eng); }
 static bool c4fm_tx_on_air(void) { return eng.c4fm != NULL && c4fm.pa; }
 
+uint8_t hrc_c4fm_level(int16_t set)
+{
+	if (set > 0 && set <= 255) {
+		c4fm.level_pct = (uint8_t)set;	// from the next key-up
+	}
+	return c4fm.level_pct != 0 ? c4fm.level_pct : HRC7000_C4FM_LEVEL_DEF;
+}
+
 static void c4fm_set_tx_level(uint8_t percent)
 {
 	c4fm.level_pct = (uint8_t)(((uint32_t)percent * HRC7000_C4FM_LEVEL_DEF + 50u) / 100u);
 }
 
-void hrc_c4fm_stats(hrc7000_c4fm_stats_t *out)
+// The driver's counters for the debug link (c4fm.drv_*): ints = PHY_RDY, timeslot, RF TX; regs = RF_MOD_BIAS_CTRL
+// as the board wrote it for DMR and as keyed for C4FM; level in percent of DMR's modulation
+static void c4fm_stats(hal_c4fm_stats_t *out)
 {
-	*out = c4fm.st;
+	const hrc7000_c4fm_stats_t *s = &c4fm.st;
+	out->keyups = s->keyups;
+	out->slots = s->slots;
+	out->sent = s->sent;
+	out->idle = s->idle;
+	out->stalls = s->stalls;
+	out->ints[0] = s->phy_ints;
+	out->ints[1] = s->ts_ints;
+	out->ints[2] = s->rftx_ints;
+	out->level_pct = c4fm.level_pct != 0 ? c4fm.level_pct : HRC7000_C4FM_LEVEL_DEF;
+	out->regs[0] = s->mod_bias_dmr;
+	out->regs[1] = s->mod_bias_c4fm;
 }
 
 const hal_c4fm_t hrc_c4fm = {
@@ -362,6 +383,7 @@ const hal_c4fm_t hrc_c4fm = {
 	.rx_start = c4fm_rx_start, .rx_read = hrc_fm_rx_read, .rx_stop = c4fm_rx_stop,
 	.tx_start = c4fm_tx_start, .tx_space = c4fm_tx_space, .tx_queued = c4fm_tx_queued, .tx_write = c4fm_tx_write,
 	.tx_stop = c4fm_tx_stop, .tx_on_air = c4fm_tx_on_air, .set_tx_level = c4fm_set_tx_level,
+	.stats = c4fm_stats,
 };
 #endif
 
