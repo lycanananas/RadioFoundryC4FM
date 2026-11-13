@@ -4689,6 +4689,7 @@ static void restore_vfo(radio_sm_t *sm, const settings_t *st, uint8_t idx)
 	sm->vfo_ch.tx_hz = v.tx_hz != 0 ? v.tx_hz : v.rx_hz;
 	// The saved mode if this build has that VFO; an older record holds FM
 	sm->vfo_ch.mode = v.mode == RADIO_MODE_DMR && CONFIG_VFO_DMR ? RADIO_MODE_DMR :
+		v.mode == RADIO_MODE_C4FM && CONFIG_C4FM ? RADIO_MODE_C4FM :
 		v.mode == RADIO_MODE_FM && CONFIG_VFO_FM ? RADIO_MODE_FM : VFO_MODE_DEFAULT;
 	sm->vfo_ch.bw = v.bw == RADIO_BW_25K ? RADIO_BW_25K : RADIO_BW_12K5;
 	sm->vfo_ch.power = v.power < board.power_count ? v.power : CODEPLUG_POWER_DEFAULT;
