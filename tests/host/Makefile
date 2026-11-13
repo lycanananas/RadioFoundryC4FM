@@ -130,7 +130,20 @@ APRSLIB := $(CORE)/aprs/ax25.c $(CORE)/aprs/hdlc.c $(CORE)/aprs/afsk.c $(CORE)/a
 aprsTest: aprsTest.c $(APRSLIB) $(NMEALIB) $(wildcard $(CORE)/aprs/*.h)
 	$(CC) $(CFLAGS) -o $@ aprsTest.c $(APRSLIB) $(NMEALIB) -lm
 
+# C4FM (the GPL fork's core/c4fm): YSF layer 2 against MMDVM_CM vectors, the baseband receiver, two-radio calls
+TESTS   += c4fmYsfTest c4fmDspTest c4fmCallTest
+C4FMLIB := $(CORE)/c4fm/ysf.c $(CORE)/dmr/ambe/ambeFec.c
+c4fmYsfTest: c4fmYsfTest.c c4fmOracle.h $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
+	$(CC) $(CFLAGS) -o $@ c4fmYsfTest.c $(C4FMLIB)
+c4fmDspTest: c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
+	$(CC) $(CFLAGS) -o $@ c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
+c4fmCallTest: c4fmCallTest.c $(CORE)/c4fm/c4fm_call.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
+	$(CC) $(CFLAGS) -I$(ROOT)/hal -o $@ c4fmCallTest.c $(CORE)/c4fm/c4fm_call.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
+
 run: $(TESTS)
+	./c4fmYsfTest
+	./c4fmDspTest
+	./c4fmCallTest
 	./dmrFecTest
 	./dmrDataTest > dmrDataTest.out; status=$$?; grep -E "^(FAIL|# (PASSED|FAILED))" dmrDataTest.out; exit $$status
 	./dmrDataServiceTest
