@@ -1,0 +1,184 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2026 The RadioFoundry Authors
+// C4FM baseband (core/c4fm/c4fm_dsp.c): modulator -> channel (gain, DC, polarity, noise, timing offset) -> receiver,
+// frames compared bit for bit and through the YSF FEC.
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include "c4fm/c4fm_dsp.h"
+#include "c4fm/ysf.h"
+
+static int failures;
+static int checks;
+
+#define CHECK(cond, ...) do { checks++; if (!(cond)) { failures++; printf("FAIL %s:%d: ", __FILE__, __LINE__); printf(__VA_ARGS__); printf("\n"); } } while (0)
+
+static uint32_t rng = 4242;
+static uint32_t rnd(void)
+{
+	rng = rng * 1103515245u + 12345u;
+	return rng >> 8;
+}
+
+// Roughly Gaussian, unit variance x 1024
+static int32_t gauss1024(void)
+{
+	int32_t s = 0;
+	for (int i = 0; i < 12; i++) {
+		s += (int32_t)(rnd() & 0xFFFFu);
+	}
+	return (s - 6 * 65536) / 64;
+}
+
+#define NFRAMES		12
+#define PREAMBLE	60	// bytes of 0x77: 100 ms
+static uint8_t tx[NFRAMES][YSF_FRAME_BYTES];
+
+static void buildFrames(void)
+{
+	for (int f = 0; f < NFRAMES; f++) {
+		uint8_t *fr = tx[f];
+		memset(fr, 0, YSF_FRAME_BYTES);
+		ysfAddSync(fr);
+		ysf_fich_t fi = { .fi = f == 0 ? YSF_FI_HEADER : f == NFRAMES - 1 ? YSF_FI_TERMINATOR : YSF_FI_COMMS,
+				  .cs = 2, .fn = (uint8_t)((f - 1) % 7), .ft = 6, .dt = YSF_DT_VD2 };
+		if (f == 0 || f == NFRAMES - 1) {
+			fi.fn = 0;
+		}
+		ysfFichEncode(&fi, fr);
+		if (fi.fi == YSF_FI_COMMS) {
+			uint8_t ambe[5][49];
+			for (int j = 0; j < 5; j++) {
+				for (int i = 0; i < 49; i++) {
+					ambe[j][i] = (uint8_t)(rnd() & 1);
+				}
+			}
+			ysfVd2Encode((const uint8_t *)"SP9ABC    ", ambe, fr);
+		} else {
+			ysfCsdEncode((const uint8_t *)"ALL       SP9ABC    ", (const uint8_t *)"                    ", fr);
+		}
+	}
+}
+
+typedef struct {
+	int got, exact, fich_ok, lost, flywheel;
+	unsigned bit_errors;
+	bool inverted;
+} rx_t;
+
+static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_t *info, void *ctx)
+{
+	rx_t *r = ctx;
+	if (info->flywheel) {
+		r->flywheel++;	// a missed sync bridged (after the end of the transmission)
+		return;
+	}
+	// Which transmitted frame: the one with the fewest differing bits
+	unsigned best = 9999;
+	for (int f = 0; f < NFRAMES; f++) {
+		unsigned d = 0;
+		for (int i = 0; i < YSF_FRAME_BYTES; i++) {
+			d += (unsigned)__builtin_popcount(frame[i] ^ tx[f][i]);
+		}
+		if (d < best) {
+			best = d;
+		}
+	}
+	r->got++;
+	r->exact += best == 0;
+	r->bit_errors += best;
+	r->inverted = info->inverted;
+	if (ysfFichDecode(frame, NULL, NULL)) {
+		r->fich_ok++;
+	}
+}
+
+static void onLost(void *ctx)
+{
+	((rx_t *)ctx)->lost++;
+}
+
+static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_samples)
+{
+	static int16_t audio[200000];
+	c4fm_mod_t m;
+	c4fmModInit(&m, (int16_t)amp);
+	uint32_t n = 0;
+	for (unsigned i = 0; i < lead_samples; i++) {
+		audio[n++] = 0;
+	}
+	uint8_t pre[PREAMBLE];
+	memset(pre, 0x77, sizeof pre);
+	n += c4fmModulate(&m, pre, PREAMBLE * 8, &audio[n]);
+	for (int f = 0; f < NFRAMES; f++) {
+		n += c4fmModulate(&m, tx[f], YSF_FRAME_BITS, &audio[n]);
+	}
+	uint8_t tail[30] = { 0 };
+	n += c4fmModulate(&m, tail, sizeof tail * 8, &audio[n]);
+	for (uint32_t i = 0; i < 4000; i++) {
+		audio[n++] = 0;	// silence after: the receiver must give up
+	}
+	for (uint32_t i = 0; i < n; i++) {
+		int32_t v = audio[i];
+		if (invert) {
+			v = -v;
+		}
+		v += dc + (gauss1024() * noise_rms) / 1024;
+		audio[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+	}
+	rx_t r = { 0 };
+	c4fm_demod_t d;
+	c4fmDemodInit(&d, onFrame, onLost, &r);
+	for (uint32_t i = 0; i < n; i += 256) {
+		c4fmDemodFeed(&d, &audio[i], n - i < 256 ? n - i : 256);
+	}
+	return r;
+}
+
+int main(void)
+{
+	buildFrames();
+
+	rx_t r = run(2000, 0, false, 0, 37);
+	CHECK(r.got == NFRAMES && r.exact == NFRAMES, "clean: %d frames, %d exact", r.got, r.exact);
+	CHECK(r.lost == 1, "clean: lost once at the end (%d)", r.lost);
+	CHECK(!r.inverted, "clean: not inverted");
+
+	for (unsigned lead = 0; lead < 15; lead++) {
+		r = run(2000, 0, false, 0, lead);
+		CHECK(r.exact == NFRAMES, "timing offset %u samples: %d exact", lead, r.exact);
+	}
+
+	r = run(1500, 3000, true, 0, 11);
+	CHECK(r.exact == NFRAMES && r.inverted, "inverted, DC offset: %d exact, inverted %d", r.exact, r.inverted);
+
+	r = run(300, -500, false, 0, 5);
+	CHECK(r.exact == NFRAMES, "weak signal, DC: %d exact", r.exact);
+
+	// Noise: inner level = amp; outer = 3 amp. SNR per symbol about 20 log10(amp / rms)
+	r = run(2000, 0, false, 400, 3);
+	CHECK(r.got == NFRAMES && r.fich_ok == NFRAMES, "noise rms 0.2 level: %d frames, %d FICH ok, %u bit errors",
+	      r.got, r.fich_ok, r.bit_errors);
+	r = run(2000, 0, false, 700, 3);
+	printf("noise rms 0.35 level: %d frames, %d FICH ok, %u bit errors, %d exact\n", r.got, r.fich_ok, r.bit_errors,
+	       r.exact);
+	CHECK(r.fich_ok >= NFRAMES - 2, "noise rms 0.35 level: FICH survives (%d)", r.fich_ok);
+
+	// Pure noise must not deliver frames that pass the FICH CRC
+	{
+		static int16_t noise[80000];
+		for (int i = 0; i < 80000; i++) {
+			noise[i] = (int16_t)(gauss1024() * 6000 / 1024);
+		}
+		rx_t z = { 0 };
+		c4fm_demod_t d;
+		c4fmDemodInit(&d, onFrame, onLost, &z);
+		c4fmDemodFeed(&d, noise, 80000);
+		CHECK(z.fich_ok == 0, "noise only: %d frames, %d with a good FICH", z.got, z.fich_ok);
+		printf("noise only (10 s): %d false frames\n", z.got);
+	}
+
+	printf("c4fmDspTest: %d checks, %d failures\n", checks, failures);
+	return failures ? 1 : 0;
+}
