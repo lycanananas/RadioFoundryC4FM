@@ -76,6 +76,9 @@ CORE_DIRS := core/app core/radio core/ui core/input core/codeplug core/settings 
 ifeq ($(CONFIG_DMR),y)
 CORE_DIRS += core/dmr/call core/dmr/ambe core/dmr/fec
 endif
+ifeq ($(CONFIG_C4FM),y)
+CORE_DIRS += core/c4fm
+endif
 ifeq ($(CONFIG_HOSTLINK),y)
 CORE_DIRS += core/hostlink
 endif

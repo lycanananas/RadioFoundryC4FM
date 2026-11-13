@@ -22,6 +22,7 @@
 #include "hal_netif.h"
 #include "hal_bcast.h"
 #include "hal_afsk.h"
+#include "hal_c4fm.h"
 #include "hal_rx2.h"
 #include "hal_hwopt.h"
 
@@ -121,6 +122,9 @@ typedef struct {
 	// Optional: APRS AFSK through the FM transmitter, and received audio for the demodulator (hal_afsk.h); NULL when
 	// not built or the radio can't
 	const hal_afsk_t *afsk;
+	// Optional: the C4FM modem (hal_c4fm.h): 4FSK byte stream out, discriminator audio in; NULL when not built or the
+	// radio can't. RADIO_MODE_C4FM is offered only with it
+	const hal_c4fm_t *c4fm;
 	// Optional, with CAP_GPS: whether the GPS module is there, for radios sold with and without one on the same board
 	// (a G model beside the plain one): true once the module has been heard. NULL = CAP_GPS alone says
 	bool (*gps_present)(void);

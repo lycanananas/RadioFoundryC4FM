@@ -8,7 +8,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef enum { RADIO_MODE_FM, RADIO_MODE_DMR } radio_mode_t;
+// C4FM: Yaesu System Fusion DN voice (board.c4fm, hal_c4fm.h). The board's RF side is set up as for DMR (flat
+// discriminator, two-point modulation); the C4FM modem takes the chip from there
+typedef enum { RADIO_MODE_FM, RADIO_MODE_DMR, RADIO_MODE_C4FM } radio_mode_t;
 typedef enum { RADIO_BW_12K5, RADIO_BW_25K } radio_bw_t;
 
 typedef enum { TONE_NONE, TONE_CTCSS, TONE_DCS, TONE_DCS_INV } tone_type_t;

@@ -364,6 +364,12 @@ typedef struct {
 	bool codec;			// the vocoder is present
 	bool dmr_running;		// the call stack has the modem
 	bool dmr_keyed;			// board.radio->tx() armed the per-burst keying (until tx_off)
+#if CONFIG_C4FM
+	bool c4fm_running;		// the C4FM engine has the modem (a C4FM channel or VFO)
+	bool c4fm_keyed;		// board.radio->tx() armed for a C4FM transmission (until tx_off)
+	uint32_t c4fm_serial;		// engine view serial last copied
+	uint8_t c4fm_dgid;		// our DG-ID (settings), 0 = all
+#endif
 	bool sfr_rpt;			// the channel's SFR repeater role has the modem (radio_sfr.c), not the call stack
 	bool sfr_denied;		// a repeater channel kept ordinary because the radio may not transmit or a scan
 					// runs: the role starts once it may (TX inhibit cleared, the scan stopped)

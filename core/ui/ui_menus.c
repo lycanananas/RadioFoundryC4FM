@@ -5749,6 +5749,10 @@ static const set_item_t s_keys[] = {
 };
 static const set_item_t s_my_radio[] = {
 	ACTION(TRN("DMR ID and name"), "callsign", SA_MY_RADIO),
+#if CONFIG_C4FM
+	// C4FM's one selector (docs/spec/c4fm.md): 00 hears everyone; the callsign is the radio name's first word
+	NUMBER(TRN("C4FM DG-ID"), "C4FM DGID digital group Fusion", UI_SET_C4FM_DGID, 0, 99, 1, NULL),
+#endif
 	// Also in Advanced, where users didn't look for it
 	ACTION(TRN("About"), "firmware version release build date", SA_FIRMWARE),
 };

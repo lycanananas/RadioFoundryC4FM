@@ -106,6 +106,9 @@ const board_t board = {
 #if CONFIG_APRS_AFSK
 	.afsk = &hrc_afsk,
 #endif
+#if CONFIG_C4FM
+	.c4fm = &hrc_c4fm,
+#endif
 #if CONFIG_HOSTLINK
 	.host_port = &hrc_host_uart_stream,
 #endif

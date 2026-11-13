@@ -1364,13 +1364,19 @@ static void quick_activate(int tile)
 		ui_st.quick_edit = true;	// the hint row says what Up / Down and the digits do
 		break;
 	case QT_MODE: {
-		bool to_dmr = view->ch.mode != RADIO_MODE_DMR;	// the view may change at once (the host simulator)
-		if (to_dmr && (view->am || view->bcast)) {
+		// FM -> C4FM -> DMR -> FM, with the modes this build's VFO has (the view may change at once: the host
+		// simulator)
+		uint8_t cur = view->ch.mode, next = RADIO_MODE_FM;
+		if (cur == RADIO_MODE_FM)
+			next = CONFIG_C4FM ? RADIO_MODE_C4FM : RADIO_MODE_DMR;
+		else if (cur == RADIO_MODE_C4FM)
+			next = CONFIG_VFO_DMR ? RADIO_MODE_DMR : RADIO_MODE_FM;
+		if (next != RADIO_MODE_FM && (view->am || view->bcast)) {
 			ui_toast(view->am ? TR("AM only in the air band") : TR("FM only in the broadcast band"));
 			break;
 		}
-		if (ui_svc_mode(to_dmr ? RADIO_MODE_DMR : RADIO_MODE_FM))
-			ui_toast(to_dmr ? "VFO: DMR" : "VFO: FM");	// the VFO keeps its mode
+		if (ui_svc_mode(next))	// the VFO keeps its mode
+			ui_toast(next == RADIO_MODE_DMR ? "VFO: DMR" : next == RADIO_MODE_C4FM ? "VFO: C4FM" : "VFO: FM");
 		else
 			quick_unavailable(kind);
 		break;

@@ -22,6 +22,10 @@
 #if CONFIG_DMR
 #include "dmr/call/dmr_call.h"
 #include "dmr/ambe/ambeVoice.h"
+#if CONFIG_C4FM
+#include "c4fm/c4fm_call.h"
+#include "radio/radio_cwid.h"	// our callsign from the radio name
+#endif
 #include "codeplug/dmr_iddb.h"
 #endif
 #if CONFIG_DMR_PRIVACY
@@ -473,6 +477,11 @@ static void end_reception(radio_sm_t *sm, uint32_t now_ms)
 // Receive on what view.ch says now
 static void dmr_begin(radio_sm_t *sm);
 static void dmr_end(radio_sm_t *sm);
+#if CONFIG_C4FM
+static void c4fm_begin(radio_sm_t *sm);
+static void c4fm_end(radio_sm_t *sm);
+static void c4fm_configure(radio_sm_t *sm);
+#endif
 
 #if CONFIG_BCAST_FM
 // The broadcast receiver on or off. Off mutes it first
@@ -566,12 +575,19 @@ static void tune(radio_sm_t *sm, uint32_t now_ms)
 	sm->save_on = sm->save_asleep = false;	// rx() below wakes the receiver
 	sm->view.rx_sleeping = false;
 #endif
-	radio_mode_t mode = (CONFIG_DMR && sm->view.ch.mode == RADIO_MODE_DMR) ? RADIO_MODE_DMR : RADIO_MODE_FM;
+	radio_mode_t mode = (CONFIG_DMR && sm->view.ch.mode == RADIO_MODE_DMR) ? RADIO_MODE_DMR :
+			    (CONFIG_C4FM && sm->view.ch.mode == RADIO_MODE_C4FM && board.c4fm != NULL) ? RADIO_MODE_C4FM :
+			    RADIO_MODE_FM;
 	// No sub-audio squelch in DMR, whatever tone the channel or the VFO still holds from its FM settings
 	static const subtone_t no_tone = { TONE_NONE, 0 };
 	if (sm->board_mode == RADIO_MODE_DMR && mode != RADIO_MODE_DMR) {
 		dmr_end(sm);		// the call stack lets go of the modem before the chip leaves DMR
 	}
+#if CONFIG_C4FM
+	if (sm->board_mode == RADIO_MODE_C4FM && mode != RADIO_MODE_C4FM) {
+		c4fm_end(sm);		// likewise for the C4FM engine
+	}
+#endif
 	if (mode != sm->board_mode) {
 		sm->board_mode = mode;
 		board.radio->set_mode(mode);
@@ -586,10 +602,15 @@ static void tune(radio_sm_t *sm, uint32_t now_ms)
 #endif
 	if (!sm->view.am && !sm->view.bcast)
 		board.radio->rx(sm->view.ch.rx_hz, (radio_bw_t)sm->view.ch.bw,
-				mode == RADIO_MODE_DMR ? &no_tone : &sm->view.ch.rx_tone);
+				mode != RADIO_MODE_FM ? &no_tone : &sm->view.ch.rx_tone);
 	if (mode == RADIO_MODE_DMR) {
 		dmr_begin(sm);		// after set_mode(DMR): the modem only starts in DMR mode
 	}
+#if CONFIG_C4FM
+	if (mode == RADIO_MODE_C4FM) {
+		c4fm_begin(sm);
+	}
+#endif
 	outputs(sm);
 	changed(sm);
 }
@@ -729,7 +750,7 @@ radio_vfo_copy_t radio_vfo_copy_check(const channel_t *ch, bool in_vfo)
 	if (in_vfo) {
 		return VFO_COPY_ALREADY;
 	}
-	if (ch->mode == RADIO_MODE_DMR ? !CONFIG_VFO_DMR : !CONFIG_VFO_FM) {
+	if (ch->mode == RADIO_MODE_DMR ? !CONFIG_VFO_DMR : ch->mode == RADIO_MODE_C4FM ? !CONFIG_C4FM : !CONFIG_VFO_FM) {
 		return VFO_COPY_NO_MODE;
 	}
 	if (!board_in_band(ch->rx_hz, false) || (ch->tx_hz != 0 && !board_in_band(ch->tx_hz, false))) {
@@ -913,7 +934,7 @@ static uint8_t tx_check(const radio_sm_t *sm)
 	if (ch->rx_only) {
 		return TXDENY_RX_ONLY;
 	}
-	if (ch->mode == RADIO_MODE_DMR ? !CONFIG_DMR : !CONFIG_FM) {
+	if (ch->mode == RADIO_MODE_DMR ? !CONFIG_DMR : ch->mode == RADIO_MODE_C4FM ? !CONFIG_C4FM : !CONFIG_FM) {
 		return TXDENY_MODE;
 	}
 	if (!board_in_band(ch->tx_hz, true)) {
@@ -1465,6 +1486,143 @@ static void dmr_end(radio_sm_t *sm)
 	sm->view.dmr.reply_active = false;
 	sm->view.dmr.alias[0] = '\0';
 }
+
+#if CONFIG_C4FM
+// --- C4FM (docs/spec/c4fm.md): the engine in core/c4fm runs the calls; this side keys the board as for DMR (the PA
+// follows the modem's stream) and copies the engine's view for the screens ---
+
+static void c4fm_configure(radio_sm_t *sm)
+{
+	c4fm_config_t c;
+	memset(&c, 0, sizeof c);
+	char call[RADIO_C4FM_CALL_LEN + 1];
+	if (radio_cwid_callsign(sm->radio_name, call, sizeof call) == 0) {
+		call[0] = '\0';	// no callsign in the radio name: receive only
+	}
+	memcpy(c.callsign, call, sizeof c.callsign);
+	c.dgid = sm->c4fm_dgid;
+	c4fm_call_configure(&c);
+	memcpy(sm->view.c4fm.call, call, sizeof sm->view.c4fm.call);
+	sm->view.c4fm.dgid = sm->c4fm_dgid;
+}
+
+// After set_mode(C4FM) and rx()
+static void c4fm_begin(radio_sm_t *sm)
+{
+	c4fm_configure(sm);
+	if (!sm->c4fm_running) {
+		sm->c4fm_running = c4fm_call_start();
+	}
+	sm->view.c4fm.active = sm->c4fm_running;
+	sm->c4fm_serial = c4fm_call_view()->serial - 1u;	// copy the engine's view at the next tick
+}
+
+static void c4fm_end(radio_sm_t *sm)
+{
+	c4fm_call_ptt(false);
+	c4fm_call_stop();
+	ambeVoiceStop();
+	if (sm->c4fm_keyed) {
+		sm->c4fm_keyed = false;
+		board.radio->tx_off();
+	}
+	sm->c4fm_running = false;
+	sm->view.c4fm.active = false;
+	sm->view.c4fm.phase = RC4FM_IDLE;
+}
+
+// PTT on a C4FM channel (band, RX-only and frequency checks passed)
+static void c4fm_ptt_down(radio_sm_t *sm, uint32_t now_ms)
+{
+	const channel_t *ch = &sm->view.ch;
+	if (!sm->codec) {
+		deny(sm, TXDENY_NO_CODEC);
+		return;
+	}
+	if (!sm->c4fm_running) {
+		deny(sm, TXDENY_MODE);
+		return;
+	}
+	if (sm->view.c4fm.call[0] == '\0') {
+		deny(sm, TXDENY_NO_ID);		// a callsign is C4FM's ID: set the radio name
+		return;
+	}
+	if (!sm->c4fm_keyed) {
+		static const subtone_t none = { TONE_NONE, 0 };
+		if (!key_tx(ch->tx_hz, RADIO_BW_12K5, sm->view.power, &none)) {
+			deny(sm, board_refusal());
+			return;
+		}
+		sm->c4fm_keyed = true;
+	}
+	sm->view.state = RS_TX;
+	sm->view.tx_auto = false;
+	sm->view.last_tx_ms = now_ms != 0 ? now_ms : 1;
+	sm->view.tx_deny = TXDENY_NONE;
+	sm->view.tx_elapsed_ms = 0;
+	sm->tx_start_ms = now_ms;
+	changed(sm);
+	c4fm_call_ptt(true);
+	c4fm_call_poll(now_ms);
+}
+
+// Every tick while the engine runs: its view to ours, the radio state from its phase, the keying released once it is
+// off the air
+static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
+{
+	const c4fm_call_view_t *cv = c4fm_call_view();
+	radio_c4fm_view_t *v = &sm->view.c4fm;
+	if (cv->serial != sm->c4fm_serial) {
+		sm->c4fm_serial = cv->serial;
+		bool was_rx = v->phase == RC4FM_RX_VOICE || v->phase == RC4FM_RX_BUSY;
+		v->phase = cv->phase;
+		memcpy(v->src, cv->src, sizeof v->src);
+		memcpy(v->dst, cv->dst, sizeof v->dst);
+		v->rx_dgid = cv->dgid;
+		v->rx_dt = cv->dt;
+		v->late_entry = cv->late_entry;
+		if (was_rx && cv->phase != C4FM_PHASE_RX_VOICE && cv->phase != C4FM_PHASE_RX_BUSY) {
+			v->last_ms = now_ms != 0 ? now_ms : 1;
+		}
+		changed(sm);
+	}
+	bool tx = c4fm_call_transmitting();
+	if (sm->c4fm_keyed && !tx && cv->phase != C4FM_PHASE_TX_DENIED) {
+		sm->c4fm_keyed = false;
+		board.radio->tx_off();	// back to receive on the channel (the engine already stopped the modem's stream)
+	}
+	if (sm->ptt) {
+		if (cv->phase == C4FM_PHASE_TX_DENIED && sm->view.state != RS_TX_DENIED) {
+			if (sm->c4fm_keyed) {
+				sm->c4fm_keyed = false;
+				board.radio->tx_off();
+			}
+			deny(sm, TXDENY_REJECTED);
+		}
+	} else if (sm->view.state == RS_TX && !tx) {
+		sm->view.state = RS_IDLE;
+		sm->view.tx_deny = TXDENY_NONE;
+		changed(sm);
+	}
+	if (sm->view.state != RS_TX && sm->view.state != RS_TX_DENIED) {
+		bool rx = cv->phase == C4FM_PHASE_RX_VOICE || cv->phase == C4FM_PHASE_RX_BUSY;
+		if (rx && sm->view.state != RS_RX) {
+			sm->view.state = RS_RX;
+			changed(sm);
+		} else if (!rx && sm->view.state == RS_RX) {
+			end_reception(sm, now_ms);
+			changed(sm);
+		}
+	}
+	if (sm->view.state == RS_TX) {
+		tx_timer(sm, now_ms);
+		if (sm->view.tot_s != 0 && sm->view.tx_elapsed_ms >= (uint32_t)sm->view.tot_s * 1000) {
+			c4fm_call_ptt(false);	// the engine sends its terminator and unkeys
+			deny(sm, TXDENY_TIMEOUT);
+		}
+	}
+}
+#endif
 
 static uint8_t dmr_deny_reason(uint8_t err)
 {
@@ -4011,6 +4169,12 @@ static void ptt_down(radio_sm_t *sm, uint32_t now_ms)
 		return;
 	}
 #endif
+#if CONFIG_C4FM
+	if (sm->view.ch.mode == RADIO_MODE_C4FM) {
+		c4fm_ptt_down(sm, now_ms);
+		return;
+	}
+#endif
 #if CONFIG_NET_USRP
 	// The host's audio replaces the microphone: never key without a way to send it
 	const hal_audio_tap_t *tap = board.audio_tap;
@@ -4053,6 +4217,19 @@ static void ptt_release(radio_sm_t *sm, bool roger, uint32_t now_ms)
 	if (sm->host_audio) {
 		roger = false;		// the host sends its own audio, tones included
 	}
+#if CONFIG_C4FM
+	if (sm->c4fm_running) {
+		c4fm_call_ptt(false);
+		c4fm_call_poll(now_ms);
+		c4fm_follow(sm, now_ms);	// on air until the terminator has gone out
+		if (sm->view.state == RS_TX_DENIED) {
+			sm->view.state = RS_IDLE;	// the release clears a refusal or a time-out
+			sm->view.tx_deny = TXDENY_NONE;
+			changed(sm);
+		}
+		return;
+	}
+#endif
 #if CONFIG_DMR
 	if (sm->dmr_running) {
 		dmr_call_ptt(false);
@@ -4430,6 +4607,14 @@ static void apply_prefs(radio_sm_t *sm, const settings_t *st)
 		memcpy(gs.radio_name, st->radio_name, CODEPLUG_RADIO_NAME_LEN);
 	}
 	memcpy(sm->radio_name, gs.radio_name, sizeof(sm->radio_name));
+#if CONFIG_C4FM
+	// C4FM: the callsign comes from the radio name, the DG-ID from the settings (0 = all)
+	sm->c4fm_dgid = st->c4fm_dgid <= C4FM_DGID_MAX ? st->c4fm_dgid : 0;
+	if (sm->c4fm_running) {
+		c4fm_configure(sm);
+		changed(sm);
+	}
+#endif
 	sm->group_hang_ms = gs.group_hang_ms;
 	sm->private_hang_ms = gs.private_hang_ms;
 #if CONFIG_DMR_PRIVACY
@@ -5085,6 +5270,10 @@ void radio_sm_init(radio_sm_t *sm, uint32_t now_ms)
 	dmr_call_init(board.dmr);	// board.dmr NULL: DMR channels receive nothing and refuse PTT
 	ambeVoiceInit(pcm_audio(), board.vocoder);
 	dmr_call_set_voice(ambeVoiceSink(), ambeVoiceSource());
+#if CONFIG_C4FM
+	c4fm_call_init(board.c4fm);	// board.c4fm NULL: C4FM isn't offered
+	c4fm_call_set_voice(ambeVoiceSink(), ambeVoiceSource());
+#endif
 #if CONFIG_BEEP
 	ambeVoiceSetMixer(beep_mix);	// beeps while the voice stream owns the PCM audio
 #endif
@@ -5572,10 +5761,13 @@ void radio_sm_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 	}
 #endif
 	case RREQ_MODE:
-		if (busy || (req->arg != RADIO_MODE_FM && req->arg != RADIO_MODE_DMR) || req->arg == sm->view.ch.mode ||
+		if (busy || (req->arg != RADIO_MODE_FM && req->arg != RADIO_MODE_DMR && req->arg != RADIO_MODE_C4FM) ||
+				req->arg == sm->view.ch.mode ||
 				(req->arg == RADIO_MODE_FM && !(sm->view.vfo ? CONFIG_VFO_FM : CONFIG_FM)) ||
 				(req->arg == RADIO_MODE_DMR && (listen_band(sm->view.ch.rx_hz) ||
-								(sm->view.vfo && !CONFIG_VFO_DMR)))) {
+								(sm->view.vfo && !CONFIG_VFO_DMR))) ||
+				(req->arg == RADIO_MODE_C4FM && (!CONFIG_C4FM || board.c4fm == NULL ||
+								 listen_band(sm->view.ch.rx_hz)))) {
 			break;
 		}
 		sm->view.ch.mode = (uint8_t)req->arg;
@@ -6202,6 +6394,12 @@ void radio_sm_poll(radio_sm_t *sm, uint32_t now_ms)
 	if (sm->dmr_running) {
 		return;		// the state follows the call stack (radio_sm_tick), and the stack keeps its own TX time-out
 	}
+#if CONFIG_C4FM
+	if (sm->c4fm_running) {
+		outputs(sm);
+		return;		// the state follows the C4FM engine (c4fm_follow)
+	}
+#endif
 #if CONFIG_SFR
 	if (sm->sfr_rpt) {
 		return;		// the state follows the repeater (sfr_rpt_tick)
@@ -6339,6 +6537,12 @@ void radio_sm_tick(radio_sm_t *sm, uint32_t now_ms)
 #endif
 #if RADIO_SM_CW
 	cw_service(sm, now_ms);
+#endif
+#if CONFIG_C4FM
+	if (sm->c4fm_running) {
+		c4fm_call_poll(now_ms);
+		c4fm_follow(sm, now_ms);
+	}
 #endif
 #if CONFIG_DMR
 	if (sm->dmr_running) {

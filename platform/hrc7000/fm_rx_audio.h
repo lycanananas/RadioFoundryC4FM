@@ -10,7 +10,7 @@
 #include "config.h"
 #include "modem/hrc7000/hrc7000.h"
 
-#if CONFIG_APRS_RX
+#if CONFIG_APRS_RX || CONFIG_C4FM
 // Once, from the radio init, after the modem is attached
 void hrc_fm_rx_attach(hrc7000_t *modem);
 // Start and stop (task level). Start takes the ring from the RTOS heap and fails without it, or without the DMR

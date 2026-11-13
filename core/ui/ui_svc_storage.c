@@ -266,6 +266,11 @@ int32_t ui_svc_setting_get(uint8_t id)
 	case UI_SET_LOW_BATTERY:
 		settings_read(&st);
 		return st.low_batt_pct;
+#if CONFIG_C4FM
+	case UI_SET_C4FM_DGID:
+		settings_read(&st);
+		return st.c4fm_dgid <= 99 ? st.c4fm_dgid : 0;
+#endif
 	case UI_SET_AUTO_OFF_MIN:
 		settings_read(&st);
 		return st.auto_off_min;
@@ -451,6 +456,14 @@ bool ui_svc_setting_set(uint8_t id, int32_t value)
 		}
 		settings_end(hal_millis());
 		return true;
+#if CONFIG_C4FM
+	case UI_SET_C4FM_DGID:
+		st = settings_begin();
+		st->c4fm_dgid = (uint8_t)clamp16(value, 0, 99);
+		settings_end(hal_millis());
+		radio_req_reload();	// the radio core reads the DG-ID on reload
+		return true;
+#endif
 #if CONFIG_DMR_PRIVACY
 	case UI_SET_PRIVACY_TYPE:
 		privacy_store((uint8_t)clamp16(value, 0, DMR_PRIVACY_NUM_TYPES - 1),

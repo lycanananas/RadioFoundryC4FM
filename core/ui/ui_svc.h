@@ -350,6 +350,7 @@ typedef enum {
 	// docs/spec/codeplug-settings.md), which the radio core takes when codeplug_kv_serial() moves on
 	UI_SET_ARS_SERVER,
 	UI_SET_IP_GATEWAY,
+	UI_SET_C4FM_DGID,	// C4FM: the DG-ID we send and hear, 0-99, 0 = all (Settings > My radio, CONFIG_C4FM; settings_t.c4fm_dgid)
 	UI_SET_COUNT
 } ui_setting_t;
 

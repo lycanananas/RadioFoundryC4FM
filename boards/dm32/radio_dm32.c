@@ -62,6 +62,9 @@ static const pa_keyup_cfg_t keyup_cfg = {
 #define FM_TX_LIMIT_25K		0x0Fu
 #define FD_REG_NOISE		0x65u
 #define FD_REG_RSSI		0x67u
+// C4FM receive (docs/spec/c4fm.md): the HR_C7000's FM_BANDWIDTH for the AF copy, 25 kHz without b6 (the voice
+// band-pass, which takes the 4FSK's energy under 300 Hz). Bench: CHIP_REG chip 1, 0x500, to try others
+#define C4FM_RX_FM_BANDWIDTH	0x0Fu
 
 static fd6818_t fd;
 static rfbus_3w_t fd_bus;
@@ -343,6 +346,26 @@ static void set_mode(radio_mode_t m)
 	if (m == mode) {
 		return;
 	}
+#if CONFIG_C4FM
+	if (mode == RADIO_MODE_C4FM) {
+		hrc_c4fm_leave();	// the C4FM modem lets go of the chip first
+	}
+	if (m == RADIO_MODE_C4FM) {
+		// The RF side as for DMR (the FD6818's flat discriminator into the HR_C7000, two-point modulation from the
+		// calibration); the C4FM modem takes the chip from there (docs/spec/c4fm.md, hardware-dm32.md)
+		if (mode == RADIO_MODE_DMR) {
+			dmr_disarm();
+			hrc_dmr_leave();
+		}
+		fd6818_set_mode(&fd, FD6818_MODE_DMR);
+		hrc_dac_b_power(true);
+		hrc7000_dmr_enter(&modem, hrc7000_mod_bias(bf_cal_tx_center(), bf_cal_modcal(rx_hz)), MIC_GAIN_DB);
+		mode = RADIO_MODE_C4FM;
+		hrc_c4fm_enter();
+		have_rx = false;
+		return;
+	}
+#endif
 	if (m == RADIO_MODE_DMR && CONFIG_DMR) {
 		fd6818_set_mode(&fd, FD6818_MODE_DMR);
 		hrc_dac_b_power(true);	// FM receive powers DAC B down; DMR needs it (hardware-dm32.md 3.8)
@@ -378,6 +401,17 @@ static bool rx_tune(uint32_t hz, radio_bw_t bw, const subtone_t *tone, bool am, 
 		fd6818_set_freq(&fd, synth_hz(hz));
 		fd6818_set_bandwidth(&fd, FD6818_BW_DMR);
 		fd6818_set_state(&fd, FD6818_STATE_RX);
+#if CONFIG_C4FM
+	} else if (mode == RADIO_MODE_C4FM) {
+		// The FD6818 as for DMR (flat discriminator); the HR_C7000 in FM, copying its AF input to the CPU at 8 kHz
+		// (modem-hrc7000.md 8.5) without the voice band-pass and without playing it: the speaker gets decoded voice
+		fd6818_set_freq(&fd, synth_hz(hz));
+		fd6818_set_bandwidth(&fd, FD6818_BW_DMR);
+		fd6818_set_state(&fd, FD6818_STATE_RX);
+		hrc7000_fm_rx(&modem, true);
+		hrc7000_wr(&modem, C7_FM_BANDWIDTH, C4FM_RX_FM_BANDWIDTH);
+		hrc7000_audio_bits(&modem, 0, C7_AUDIO_FM_PLAY);
+#endif
 	} else {
 		fd6818_set_freq(&fd, synth_hz(hz));
 #if CONFIG_AM_RX
@@ -452,17 +486,19 @@ static bool tx(uint32_t hz, radio_bw_t bw, uint8_t power, const subtone_t *tone)
 	tx_uhf = hz >= UHF_FROM_HZ;
 	tx_drive = bf_cal_power_level(hz, power);
 #if CONFIG_DMR
-	if (mode == RADIO_MODE_DMR) {
+	if (mode == RADIO_MODE_DMR || mode == RADIO_MODE_C4FM) {
 		keyup_plan(hz);
 	}
 #endif
 	tx_hz = hz;
 	write_mod_bias(hz);
 	// DMR keeps listening on the RX frequency until a burst (burst_on retunes per burst); on a split channel the
-	// synthesizer on the TX frequency here left the radio deaf to the repeater's downlink
-	fd6818_set_freq(&fd, synth_hz(mode == RADIO_MODE_DMR && have_rx ? rx_hz : hz));
+	// synthesizer on the TX frequency here left the radio deaf to the repeater's downlink. C4FM keys through the same
+	// burst sequence, once for the whole transmission
+	bool digital = mode == RADIO_MODE_DMR || mode == RADIO_MODE_C4FM;
+	fd6818_set_freq(&fd, synth_hz(digital && have_rx ? rx_hz : hz));
 	hrc_dac_b_power(true);
-	if (mode == RADIO_MODE_DMR) {
+	if (digital) {
 		// 8.5 "Enter DMR TX": the PA select and drive wait for each burst's sequence. Between bursts the radio
 		// receives: the FD6818 in RX and the LNA on until the RF task switches to the first burst (burst_on). In TX
 		// here, the hotspot, which keys to listen, heard nothing until its first burst
@@ -727,6 +763,22 @@ static void rx_sleep(bool sleep)
 // frames and this one don't mix
 bool dm32_chip_reg(uint8_t chip, uint8_t page, uint8_t reg, uint32_t *val, bool write)
 {
+#if CONFIG_C4FM
+	// Chip 1 (C4FM bench, docs/spec/c4fm.md): the HR_C7000's modem registers, offset page << 8 | reg (word aligned,
+	// up to 0x7FC), read or written straight: the C4FM deviation (RF_MOD_BIAS_CTRL 0x114), the FM receive chain
+	// (FM_BANDWIDTH 0x500), the AF gain (RF_MODE 0x104)
+	if (chip == 1) {
+		uint32_t off = ((uint32_t)page << 8) | reg;
+		if ((off & 3u) != 0 || off > 0x7FCu) {
+			return false;
+		}
+		if (write) {
+			hrc7000_wr(&modem, off, *val);
+		}
+		*val = hrc7000_rd(&modem, off);
+		return true;
+	}
+#endif
 	if (chip != 0 || page != 0 || reg > 0x7Fu || (write && *val > 0xFFFFu) || fd.bus == NULL) {
 		return false;	// fd.bus: not attached yet (radio init)
 	}

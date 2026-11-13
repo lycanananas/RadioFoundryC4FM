@@ -148,7 +148,7 @@ bool ui_svc_vfo_sfr(uint8_t a)
 #if CONFIG_FM
 bool ui_svc_mode(uint8_t mode)
 {
-	if (mode != RADIO_MODE_FM && mode != RADIO_MODE_DMR) {
+	if (mode != RADIO_MODE_FM && mode != RADIO_MODE_DMR && !(CONFIG_C4FM && mode == RADIO_MODE_C4FM)) {
 		return false;
 	}
 	radio_req_mode(mode);

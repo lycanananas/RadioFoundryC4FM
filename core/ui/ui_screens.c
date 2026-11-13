@@ -254,8 +254,78 @@ static uint8_t rssi_bars(int16_t dbm)
 // The mode word: AM where an FM channel or the VFO is received in AM (the air band)
 static const char *mode_word(const radio_view_t *v)
 {
-	return v->ch.mode == RADIO_MODE_DMR ? "DMR" : v->am ? "AM" : "FM";
+	return v->ch.mode == RADIO_MODE_DMR ? "DMR" : v->ch.mode == RADIO_MODE_C4FM ? "C4FM" : v->am ? "AM" : "FM";
 }
+
+#if CONFIG_C4FM
+// "DG-ID 05" (0 reads "DG-ID 00": every transmission is heard)
+static void sb_dgid(sbuf_t *b, uint8_t dgid)
+{
+	sb_str(b, "DG-ID ");
+	sb_u32(b, dgid, 2);
+}
+
+// C4FM's talk row (docs/spec/c4fm.md): who we are on the air and with which DG-ID; while a transmission is heard,
+// its callsign and DG-ID
+static void draw_talk_c4fm(const radio_view_t *v)
+{
+	const ui_layout_t *L = &ui_layout;
+	const font_t *f = L->medium;
+	const radio_c4fm_view_t *c = &v->c4fm;
+	char buf[48], fit[48];
+	sbuf_t b;
+	sb_init(&b, buf, sizeof buf);
+	color_t col = ui_col.fg;
+	bool rx = c->phase == RC4FM_RX_VOICE || c->phase == RC4FM_RX_BUSY;
+	const char *glyph = GLYPH_ARROW;
+	if (rx) {
+		sb_str(&b, c->src[0] != '\0' ? c->src : "?");
+		sb_chr(&b, ' ');
+		sb_dgid(&b, c->rx_dgid);
+		col = ui_col.rx;
+	} else if (!c->active) {
+		sb_str(&b, TR("C4FM: no modem"));
+		col = ui_col.warn;
+	} else if (c->call[0] == '\0') {
+		sb_str(&b, TR("Set a callsign: radio name"));
+		col = ui_col.warn;
+	} else if (v->ch.rx_only) {
+		sb_str(&b, TR("RX only"));
+		col = ui_col.warn;
+	} else {
+		sb_str(&b, c->call);
+		sb_chr(&b, ' ');
+		sb_dgid(&b, c->dgid);
+	}
+	int x = gfx_text(f, 0, L->talk_y, glyph, ui_col.dim);
+	gfx_text_fit(f, buf, gfx_width() - x, fit, sizeof fit);
+	gfx_text(f, x, L->talk_y, fit, col);
+}
+
+// C4FM's chips: the mode heard or sent, power
+static void draw_chips_c4fm(const radio_view_t *v)
+{
+	const ui_layout_t *L = &ui_layout;
+	const font_t *f = L->small;
+	int x = gfx_text(f, 0, L->chips_y, "DN", ui_col.fg) + f->w;
+	bool pw_temp = v->power != channel_power(v);
+	if (pw_temp)
+		x = gfx_text(f, x, L->chips_y, GLYPH_DOT, ui_col.warn);
+	x = gfx_text(f, x, L->chips_y, ui_power_name(v->power, v->ch.tx_hz), pw_temp ? ui_col.warn : ui_col.fg) + f->w;
+	gfx_text(f, x, L->chips_y, "12.5k", ui_col.fg);
+}
+
+// The C4FM data type heard, for the receiving line
+static const char *c4fm_dt_word(uint8_t dt)
+{
+	switch (dt) {
+	case 2: return "DN";
+	case 3: return TR("VW: not played");
+	case 0: return TR("V/D 1: not played");
+	default: return TR("data");
+	}
+}
+#endif
 
 // Status strip (P2): state pill, mode, monitor, lock, unread messages, signal, battery.
 // A titled screen (prefix and / or name) on a display under UI_TALL_PX high merges its title into the strip
@@ -978,6 +1048,12 @@ static void draw_place(const radio_view_t *v, const ui_state_t *s)
 
 static void draw_talk(const radio_view_t *v, bool label_first)
 {
+#if CONFIG_C4FM
+	if (v->ch.mode == RADIO_MODE_C4FM) {
+		draw_talk_c4fm(v);
+		return;
+	}
+#endif
 #if CONFIG_DMR
 	if (v->ch.mode == RADIO_MODE_DMR) {
 		draw_talk_dmr(v, label_first);
@@ -1029,6 +1105,12 @@ static void draw_chips(const radio_view_t *v, const ui_state_t *s)
 #if CONFIG_DMR
 	if (v->ch.mode == RADIO_MODE_DMR) {
 		draw_chips_dmr(v, s);
+		return;
+	}
+#endif
+#if CONFIG_C4FM
+	if (v->ch.mode == RADIO_MODE_C4FM) {
+		draw_chips_c4fm(v);
 		return;
 	}
 #endif
@@ -1676,6 +1758,21 @@ static void draw_activity(const radio_view_t *v, const ui_state_t *s)
 		int tw = gfx_text_width(big, buf);
 		gfx_text(big, w - tw, y, buf, ui_col.fg);
 		draw_meter(0, y + big->h / 4, w - tw - big->w, big->h / 2, v->rssi_dbm);
+#if CONFIG_C4FM
+		if (two && v->ch.mode == RADIO_MODE_C4FM) {
+			// Who is talking, in which DG-ID and mode (a transmission not played says why)
+			sb_init(&b, buf, sizeof buf);
+			sb_str(&b, v->c4fm.src[0] != '\0' ? v->c4fm.src : TR("C4FM"));
+			sb_chr(&b, ' ');
+			sb_str(&b, c4fm_dt_word(v->c4fm.rx_dt));
+			if (v->c4fm.phase == RC4FM_RX_BUSY && v->c4fm.rx_dt == 2) {
+				sb_str(&b, TR(", other DG-ID"));
+			}
+			gfx_text_fit(sm, buf, w, fit, sizeof fit);
+			gfx_text(sm, 0, y2, fit, ui_col.rx);
+			break;
+		}
+#endif
 		if (two)
 			gfx_text(sm, 0, y2, v->monitor ? TR("Squelch open") : TR("Receiving"), ui_col.rx);
 		break;
@@ -1738,6 +1835,18 @@ static void draw_activity(const radio_view_t *v, const ui_state_t *s)
 #if CONFIG_DMR
 		if (v->ch.mode == RADIO_MODE_DMR && v->dmr.active) {
 			draw_last_heard(v, s, y);	// hear all shows as "All" in the chips and in the hint
+			break;
+		}
+#endif
+#if CONFIG_C4FM
+		if (v->ch.mode == RADIO_MODE_C4FM && v->c4fm.last_ms != 0 && v->c4fm.src[0] != '\0') {
+			sb_str(&b, TR("Last heard "));
+			sb_str(&b, v->c4fm.src);
+			sb_chr(&b, ' ');
+			sb_age(&b, s->now_ms - v->c4fm.last_ms);
+			y += (L->activity_h - sm->h) / 2;
+			gfx_text_fit(sm, buf, gfx_width(), fit, sizeof fit);
+			gfx_text(sm, 0, y, fit, ui_col.dim);
 			break;
 		}
 #endif
@@ -3082,7 +3191,7 @@ bool ui_quick_tile(int tile, const radio_view_t *v, const ui_state_t *s, char *l
 		sb_str(&b, mode_word(v));	// what it is, as every other tile
 		// Only in the VFO (a channel's tile 4 is QT_TO_VFO), in a build with both VFO kinds; it keeps the mode like
 		// its other settings
-		return feat(UI_FEAT_MODE) && v->vfo && CONFIG_VFO_FM && CONFIG_VFO_DMR;
+		return feat(UI_FEAT_MODE) && v->vfo && CONFIG_VFO_FM && (CONFIG_VFO_DMR || CONFIG_C4FM);
 	case QT_TO_VFO:
 		sb_str(&b, TR("Copy"));
 		return CONFIG_VFO_FM || CONFIG_VFO_DMR;	// a channel the VFO can't hold is refused on the press, with the reason

@@ -48,6 +48,16 @@ bool hrc_dmr_fm_rx_hook(void (*fn)(void));
 
 extern const hal_dmr_modem_t hrc_dmr;
 
+#if CONFIG_C4FM
+#include "hal_c4fm.h"
+// C4FM (hrc7000_c4fm.h): the board's set_mode(C4FM) calls enter after hrc7000_dmr_enter (the chip set up as for DMR:
+// calibration, two-point modulation), leave before it sets up FM. The board's rx() for C4FM sets the chip's FM
+// receive (hrc7000_fm_rx, band-pass off) so the AF copy runs
+void hrc_c4fm_enter(void);
+void hrc_c4fm_leave(void);
+extern const hal_c4fm_t hrc_c4fm;
+#endif
+
 // Bring-up counters: lines of at most about 20 characters, and the reset
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 #define HRC_DMR_DIAG_LINES	15	// and the split duplex TX half's BS outbound (two "bs" lines)

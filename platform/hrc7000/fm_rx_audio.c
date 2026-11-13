@@ -6,7 +6,7 @@
 // every 25 ms, so the ring holds four halves (128 ms) for a late poll. The ring comes from the RTOS heap only while
 // APRS listens: static RAM is short on these radios.
 #include "config.h"
-#if CONFIG_APRS_RX
+#if CONFIG_APRS_RX || CONFIG_C4FM
 #include "fm_rx_audio.h"
 #include "dmr_glue.h"
 #include "platform.h"

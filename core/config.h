@@ -279,6 +279,10 @@
 #ifndef CONFIG_APRS_DMR
 #define CONFIG_APRS_DMR			(CONFIG_APRS && CONFIG_DMR)
 #endif
+// C4FM DN voice (the GPL fork's core/c4fm, docs/spec/c4fm.md): a radio mode beside FM, sharing DMR's codec glue
+#ifndef CONFIG_C4FM
+#define CONFIG_C4FM			0
+#endif
 #ifndef CONFIG_APRS_RX
 #define CONFIG_APRS_RX			CONFIG_APRS_AFSK
 #endif

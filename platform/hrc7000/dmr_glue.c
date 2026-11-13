@@ -25,6 +25,10 @@
 #include "dmr/bsOutbound.h"
 #endif
 #include "audio_pcm.h"
+#if CONFIG_C4FM
+#include "modem/hrc7000/hrc7000_c4fm.h"
+#include "fm_rx_audio.h"
+#endif
 #include "hal_time.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -90,6 +94,11 @@ static void notify(void *ctx)
 // A split duplex hotspot's base-station outbound keys once for its whole length (hrc7000_bs.c)
 static bool outbound_continuous(void)
 {
+#if CONFIG_C4FM
+	if (eng.c4fm != NULL) {
+		return true;	// a C4FM transmission keys once for its whole length too
+	}
+#endif
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 	return eng.bs != NULL;
 #else
@@ -206,6 +215,9 @@ HRC_FLASHFUNC static void dmr_task(void *arg)
 			hrc7000_dmr_poll(&eng);
 			lost_check(pic);
 		}
+#if CONFIG_C4FM
+		hrc7000_c4fm_poll(&eng);	// the PA watchdog of a C4FM transmission (outside DMR: not active)
+#endif
 		while (hrc7000_dmr_pop(&eng, &ev, &burst)) {
 			dmr_event_cb_t cb = stack_cb;
 			if (cb != NULL) {
@@ -279,8 +291,79 @@ void hrc_dmr_rx_restart(void)
 
 bool hrc_dmr_tx_active(void)
 {
+#if CONFIG_C4FM
+	if (eng.c4fm != NULL) {
+		return true;	// the prompt FIFO's gate (audio_pcm.c) stays closed while C4FM transmits
+	}
+#endif
 	return active && hrc7000_dmr_is_transmitting(&eng);
 }
+
+#if CONFIG_C4FM
+// --- C4FM (hrc7000_c4fm.h, hal_c4fm.h): the modem interrupts on without the DMR engine; the C4FM driver takes the
+// vectors while it transmits, and receive is the FM audio copy (fm_rx_audio.c) ---
+
+static hrc7000_c4fm_t c4fm;
+static bool c4fm_on;	// the board is in C4FM mode (hrc_c4fm_enter)
+
+void hrc_c4fm_enter(void)
+{
+	rf_on_rx = false;
+	c4fm_on = true;
+	irqs_enable(true);	// the timeslot, PHY_RDY and RF TX vectors for the physical layer; the engine stays off
+}
+
+void hrc_c4fm_leave(void)
+{
+	hrc7000_c4fm_tx_stop(&eng);
+	hrc_fm_rx_stop();
+	irqs_enable(false);
+	c4fm_on = false;
+	rf_on_rx = false;
+}
+
+static bool c4fm_rx_start(void)
+{
+	return c4fm_on && hrc_fm_rx_start();
+}
+
+static void c4fm_rx_stop(void)
+{
+	hrc_fm_rx_stop();
+}
+
+static bool c4fm_tx_start(void)
+{
+	if (!c4fm_on) {
+		return false;
+	}
+	hrc_audio_pcm_tx_gate();	// the prompt FIFO feeds the modulator: no speaker audio on it while keyed
+	return hrc7000_c4fm_tx_start(&c4fm, &eng);
+}
+
+static uint16_t c4fm_tx_space(void) { return hrc7000_c4fm_space(&c4fm); }
+static uint16_t c4fm_tx_queued(void) { return eng.c4fm != NULL ? hrc7000_c4fm_queued(&c4fm) : 0; }
+static bool c4fm_tx_write(const uint8_t *b, uint16_t n) { return eng.c4fm != NULL && hrc7000_c4fm_write(&c4fm, b, n); }
+static void c4fm_tx_stop(void) { hrc7000_c4fm_tx_stop(&eng); }
+static bool c4fm_tx_on_air(void) { return eng.c4fm != NULL && c4fm.pa; }
+
+static void c4fm_set_tx_level(uint8_t percent)
+{
+	c4fm.level_pct = (uint8_t)(((uint32_t)percent * HRC7000_C4FM_LEVEL_DEF + 50u) / 100u);
+}
+
+void hrc_c4fm_stats(hrc7000_c4fm_stats_t *out)
+{
+	*out = c4fm.st;
+}
+
+const hal_c4fm_t hrc_c4fm = {
+	.rx_rate_hz = 8000,
+	.rx_start = c4fm_rx_start, .rx_read = hrc_fm_rx_read, .rx_stop = c4fm_rx_stop,
+	.tx_start = c4fm_tx_start, .tx_space = c4fm_tx_space, .tx_queued = c4fm_tx_queued, .tx_write = c4fm_tx_write,
+	.tx_stop = c4fm_tx_stop, .tx_on_air = c4fm_tx_on_air, .set_tx_level = c4fm_set_tx_level,
+};
+#endif
 
 void hrc_dmr_tx_drop(void)
 {

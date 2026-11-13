@@ -3,6 +3,7 @@
 // HR_C7000 DMR slot engine (hrc7000_dmr.h; docs/spec/modem-hrc7000.md 3, 5, 6)
 #include <string.h>
 #include "hrc7000_dmr.h"
+#include "hrc7000_c4fm.h"	// C4FM transmit takes the chip over (e->c4fm)
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 #include "hrc7000_bs.h"	// split duplex TX half: the BS outbound takes the chip over (e->bs)
 #define BS_ACTIVE(e)	((e)->bs != NULL)
@@ -762,6 +763,12 @@ void hrc7000_dmr_isr_sys(hrc7000_dmr_t *e)
 		if ((list & C7_SYS_FM_RX) != 0 && e->fm_rx != NULL) {
 			e->fm_rx();
 		}
+#if defined(CONFIG_C4FM) && CONFIG_C4FM
+		if (e->c4fm != NULL) {
+			hrc7000_c4fm_isr_sys(e, list);
+			continue;
+		}
+#endif
 		if (!e->running) {
 			continue;
 		}
@@ -798,6 +805,12 @@ void hrc7000_dmr_isr_timeslot(hrc7000_dmr_t *e, bool tx_vector)
 	} else {
 		e->st.ts_rx_ints++;
 	}
+#if defined(CONFIG_C4FM) && CONFIG_C4FM
+	if (e->c4fm != NULL) {
+		hrc7000_c4fm_isr_timeslot(e);	// either vector: the physical layer's slot clock
+		return;
+	}
+#endif
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 	if (e->running && e->bs != NULL) {
 		hrc7000_bs_isr_timeslot(e);	// either vector: the physical layer's slot clock
@@ -845,6 +858,12 @@ void hrc7000_dmr_isr_rftx(hrc7000_dmr_t *e)
 {
 	w(e, C7_INTERP_CLEAR, C7_INT_RF_TX);
 	e->st.rftx_ints++;
+#if defined(CONFIG_C4FM) && CONFIG_C4FM
+	if (e->c4fm != NULL) {
+		hrc7000_c4fm_isr_rftx(e);
+		return;
+	}
+#endif
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 	if (e->running && e->bs != NULL) {
 		hrc7000_bs_isr_rftx(e);

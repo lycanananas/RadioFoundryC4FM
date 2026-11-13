@@ -191,6 +191,9 @@ typedef struct {
 #if defined(CONFIG_HOTSPOT_SPLIT) && CONFIG_HOTSPOT_SPLIT
 	struct hrc7000_bs *bs;	// split duplex BS outbound in charge of the chip (hrc7000_bs.c), NULL otherwise
 #endif
+#if defined(CONFIG_C4FM) && CONFIG_C4FM
+	struct hrc7000_c4fm *c4fm;	// C4FM transmit in charge of the chip (hrc7000_c4fm.c), NULL otherwise
+#endif
 
 	hrc7000_dmr_evslot_t evq[HRC7000_DMR_EVQ_DEPTH];
 	volatile uint8_t evq_head, evq_tail;

@@ -275,11 +275,14 @@ CONFIG_APRS_IGATE ?= $(if $(and $(filter y,$(CONFIG_APRS_RX)),$(filter y,$(CONFI
 # the GPS status screen: satellites on a sky plot and signal bars, fix quality, grid locator (core/position/nmea_sky.c,
 # core/ui/ui_gps.c, docs/spec/position.md 3). Needs GPS; off, Tools > Position is a page of text
 CONFIG_GPS_SKY ?= $(CONFIG_GPS)
+# C4FM: Yaesu System Fusion DN voice beside FM, with a callsign and a DG-ID (the GPL fork's core/c4fm,
+# docs/spec/c4fm.md). Needs DMR (the AMBE+2 codec and the modem glue it shares) and a board with board.c4fm
+CONFIG_C4FM ?= n
 
 
 FEATURES := USB_SERIAL_REQUEST FM SUBTONE DMR DMR_PRIVACY DMR_TALKER_ALIAS DMR_GPS DMR_SMS DMR_TMS DMR_ARS DMR_LRRP DMR_SIGNALING DMR_EMERGENCY DMR_ROAMING DMR_IP_GATEWAY ZONE_SHARE DMR_UDP_COMPRESS NET_TCP NET_KISS NET_HTTP NET_HTTP_GZIP NET_WEBCTL NET_RIGCTL NET_APRSIS NET_USRP MDNS TFTP TFTP_IDDB IDDB_COMPACT DMR_CONTROL_STATION SNMP SFR SFR_DUALPATH_RX SFR_CWID TASK_STACKS \
 	USB HOSTLINK USB_NETWORK NET_PPP HOTSPOT HOTSPOT_SPLIT DEBUGLINK CPS_OPENFW CPS_FAST VFO VFO_FM VFO_DMR DIAG FONT_XL FONT_AA FONT_BIG LANG_ES LANG_IT LANG_ZH LANG_DEFAULT_ES LANG_DEFAULT_IT LANG_DEFAULT_ZH UI_COLOR UI_SETTINGS SCAN DUAL_WATCH BEEP FM_TX_TONES DTMF \
-	RX_EXT VOX REF_TRIM BATTERY_SAVE VIBRATE GPS AUDIO_PROBE STUB_ENTRY NAND_STORAGE CRASH_LOG CRASH_SCREEN CRASH_REPORT WATCHDOG FAULT_TRACE AM_RX BCAST_FM APRS APRS_AFSK APRS_DMR APRS_RX APRS_IGATE GPS_SKY KEY_ASSIGN CHANNEL_LIST CHANNEL_EDIT ZONE_EDIT CONTACT_EDIT VOLUME_BAR
+	RX_EXT VOX REF_TRIM BATTERY_SAVE VIBRATE GPS AUDIO_PROBE STUB_ENTRY NAND_STORAGE CRASH_LOG CRASH_SCREEN CRASH_REPORT WATCHDOG FAULT_TRACE AM_RX BCAST_FM APRS APRS_AFSK APRS_DMR APRS_RX APRS_IGATE GPS_SKY KEY_ASSIGN CHANNEL_LIST CHANNEL_EDIT ZONE_EDIT CONTACT_EDIT VOLUME_BAR C4FM
 
 # The panel's width in pixels: the display class the board's board.toml names (hardware.gallery = "160x128", the width
 # first). Empty when it names none, which counts as a narrow panel
@@ -462,6 +465,11 @@ endif
 ifneq ($(call feature_on,GPS_SKY),)
   ifeq ($(call feature_on,GPS),)
     $(error CONFIG_GPS_SKY=y needs CONFIG_GPS=y)
+  endif
+endif
+ifneq ($(call feature_on,C4FM),)
+  ifeq ($(call feature_on,DMR),)
+    $(error CONFIG_C4FM=y needs CONFIG_DMR=y)
   endif
 endif
 ifeq ($(call feature_on,FM)$(call feature_on,DMR),)

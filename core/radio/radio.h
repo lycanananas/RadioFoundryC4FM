@@ -181,6 +181,28 @@ typedef struct {
 } radio_dmr_view_t;
 #endif
 
+#if CONFIG_C4FM
+#define RADIO_C4FM_CALL_LEN	10
+
+// radio_c4fm_view_t.phase (= c4fm_phase_t in c4fm/c4fm_call.h)
+enum { RC4FM_IDLE, RC4FM_RX_VOICE, RC4FM_RX_BUSY, RC4FM_TX_VOICE, RC4FM_TX_ENDING, RC4FM_TX_DENIED };
+
+// C4FM for the screens (docs/spec/c4fm.md): our callsign and DG-ID, the transmission heard
+typedef struct {
+	bool active;		// the C4FM engine runs (a C4FM channel or VFO)
+	uint8_t phase;		// RC4FM_*
+	uint8_t dgid;		// ours: what we send, and the one we hear (0 = all)
+	char call[RADIO_C4FM_CALL_LEN + 1];	// ours ("" = none set: no transmit)
+	// The transmission heard (or the last one)
+	char src[RADIO_C4FM_CALL_LEN + 1];
+	char dst[RADIO_C4FM_CALL_LEN + 1];
+	uint8_t rx_dgid;
+	uint8_t rx_dt;		// YSF data type: 0 V/D 1, 1 data, 2 DN (V/D 2), 3 VW (voice full rate)
+	bool late_entry;
+	uint32_t last_ms;	// hal_millis() at its end, 0 = none yet
+} radio_c4fm_view_t;
+#endif
+
 #if CONFIG_DMR_ROAMING
 #define RADIO_ROAM_SITES	16	// = ROAM_SITES_MAX (radio/roam.h)
 
@@ -303,6 +325,9 @@ typedef struct {
 #if CONFIG_DMR
 	radio_dmr_view_t dmr;
 #endif
+#if CONFIG_C4FM
+	radio_c4fm_view_t c4fm;
+#endif
 #if CONFIG_DMR_ROAMING
 	radio_roam_view_t roam;
 #endif
@@ -393,7 +418,7 @@ void radio_req_dmr_target_clear(void);
 // CONFIG_VFO_FM and CONFIG_VFO_DMR
 void radio_req_dmr_timeslot(uint8_t ts);	// 1 or 2
 void radio_req_dmr_color_code(uint8_t cc);	// 0..15
-void radio_req_mode(uint8_t mode);		// radio_mode_t: FM or DMR on the current channel or the VFO
+void radio_req_mode(uint8_t mode);		// radio_mode_t: FM, DMR or C4FM on the current channel or the VFO
 // The VFO's SFR role (CONFIG_SFR, docs/spec/sfr.md 4): a as a codeplug channel's SFR byte A, role bits 0 = none; the
 // outbound color code is the VFO's own. Saved with the VFO; refused outside it, while transmitting and in hotspot mode
 void radio_req_vfo_sfr(uint8_t a);
