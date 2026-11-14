@@ -1520,6 +1520,7 @@ static void c4fm_configure(radio_sm_t *sm)
 	c4fm_call_configure(&c);
 	memcpy(sm->view.c4fm.call, call, sizeof sm->view.c4fm.call);
 	sm->view.c4fm.dgid = c.dgid;
+	sm->view.c4fm.decoder = c.decoder;
 }
 
 // After set_mode(C4FM) and rx()
