@@ -57,7 +57,9 @@ const rxFreq = (t) => (r, k, v) => {
 const listening = (value) => !!listenBand(parseFreq(value("rxHz")));
 
 // The mode as the radio shows it: an FM channel in the air band is received in AM
-const modeText = (r, t) => (r.mode === "dmr" ? "DMR" : listenBand(r.rxHz) ? t(`editor.mode.${listenBand(r.rxHz)}`) : "FM");
+const modeText = (r, t) => (r.mode === "dmr" ? "DMR" : r.mode === "c4fm" ? "C4FM" : listenBand(r.rxHz) ? t(`editor.mode.${listenBand(r.rxHz)}`) : "FM");
+const MODES = [["fm", "FM"], ["dmr", "DMR"], ["c4fm", "C4FM"]];
+const DGIDS = () => [...Array(100).keys()].map((n) => [n, String(n).padStart(2, "0")]);
 
 const tone = (t) => (r, k, v) => {
 	const s = parseTone(v);
@@ -133,7 +135,7 @@ export function columns(table, m, t) {
 		return [
 			num,
 			col("name", "editor.col.name", "text", name(LIMITS.name)(t)),
-			col("mode", "editor.col.mode", "select", pick, { options: () => [["fm", "FM"], ["dmr", "DMR"]], format: (v, r) => modeText(r, t) }),
+			col("mode", "editor.col.mode", "select", pick, { options: () => MODES, format: (v, r) => modeText(r, t) }),
 			col("rxHz", "editor.col.rx", "text", (r, k, v) => {
 				// a simplex channel stays simplex: TX follows RX when they were the same
 				const was = r.rxHz;
@@ -147,6 +149,7 @@ export function columns(table, m, t) {
 			only("fm", col("rxTone", "editor.col.rx_tone", "text", tone(t), { format: (v) => toneText(v, t), editValue: (v) => v })),
 			only("fm", col("txTone", "editor.col.tx_tone", "text", tone(t), { format: (v) => toneText(v, t), editValue: (v) => v })),
 			only("dmr", col("colorCode", "editor.col.cc", "select", pick, { options: () => [...Array(16).keys()].map((n) => [n, String(n)]) })),
+			only("c4fm", col("dgid", "editor.col.dgid", "select", pick, { options: DGIDS })),
 			only("dmr", col("timeslot", "editor.col.ts", "select", pick, { options: () => [[1, "1"], [2, "2"]] })),
 			only("dmr", col("contact", "editor.col.contact", "select", pick, { options: () => refOptions(m.contacts, t), format: (v) => refLabel(v, t), sortValue: (r) => refLabel(r.contact, t) })),
 			only("dmr", col("rxList", "editor.col.rx_list", "select", pick, { options: () => refOptions(m.rxLists, t), format: (v) => refLabel(v, t), sortValue: (r) => refLabel(r.rxList, t) })),
@@ -233,11 +236,13 @@ export function channelForm(m, t) {
 	// the FM and DMR parts show only for a channel of that mode; the other mode's values are kept as they are
 	const fm = (f) => ({ ...f, show: (r) => r.mode === "fm" });
 	const dmr = (f) => ({ ...f, show: (r) => r.mode === "dmr" && (!f.show || f.show(r)) });
+	const c4fm = (f) => ({ ...f, show: (r) => r.mode === "c4fm" });
 	const sfr = (f, label, options) => dmr({ ...sfrField(...f), label: t(label), type: "select", options, show: (r) => r.sfr });
 	return [
 		{ group: t("editor.form.basic") },
 		txt("name", "editor.col.name", name(LIMITS.name)(t)),
-		sel("mode", "editor.col.mode", () => [["fm", "FM"], ["dmr", "DMR"]]),
+		sel("mode", "editor.col.mode", () => MODES),
+		c4fm(sel("dgid", "editor.col.dgid", DGIDS)),
 		sel("power", "editor.col.power", () => powerOptions(t)),
 		// in a receive-only band TX follows RX, locked (rxFreq)
 		{ type: "pair", key: "freqs", disabled: (w, value) => listening(value),

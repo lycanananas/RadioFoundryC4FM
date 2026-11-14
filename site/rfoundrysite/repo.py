@@ -193,10 +193,14 @@ def variants():
 					reason.append(line[1:].strip())
 					continue
 				fm = re.match(r"^CONFIG_(\w+)\s*\?=\s*n\s*$", line)
+				fon = re.match(r"^CONFIG_(\w+)\s*\?=\s*y\s*$", line)
 				if fm:
 					v["off"].append({"name": fm.group(1), "why": " ".join(reason)})
+				elif fon:
+					# the C4FM fork's variant turns its feature on (config/variants/c4fm.mk)
+					v.setdefault("on", []).append({"name": fon.group(1), "why": " ".join(reason)})
 				elif line.strip():
-					raise SourceError("%s: a variant only turns switches off (CONFIG_X ?= n): %r" % (p, line))
+					raise SourceError("%s: a variant only turns switches on or off (CONFIG_X ?= y|n): %r" % (p, line))
 				reason = []
 		if not v["title"]:
 			raise SourceError("%s: no '## title:' line" % p)

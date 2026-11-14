@@ -1538,6 +1538,7 @@
  "editor.col.rx_tone": "RX Tone",
  "editor.col.tx_tone": "TX Tone",
  "editor.col.cc": "Color Code",
+ "editor.col.dgid": "DG-ID",
  "editor.col.ts": "Timeslot",
  "editor.col.contact": "TX Contact",
  "editor.col.rx_list": "RX Group List",

@@ -759,3 +759,19 @@ test("a format C database goes to an older radio as format N, and to TFTP as for
 	const capped = tftpBytes(img, iddb.AREA2 + 0x100000);
 	assert.ok(capped.length <= iddb.AREA2 + 0x100000 && iddb.readHeader(capped).count === t2.count);
 });
+
+test("C4FM channel: mode byte 2, the DG-ID in the color code byte (the C4FM fork's)", () => {
+	const c = newChannel({ name: "SR5WI", rxHz: 438900000, txHz: 431300000, mode: "c4fm", dgid: 42 });
+	const r = encodeChannel(c, blankChannel());
+	assert.equal(r[0x18], 2);
+	assert.equal(r[0x2C], 42);
+	const back = decodeChannel(r);
+	assert.equal(back.mode, "c4fm");
+	assert.equal(back.dgid, 42);
+	assert.equal(back.colorCode, 0);
+	// a DMR channel keeps its color code
+	const d = decodeChannel(encodeChannel(newChannel({ mode: "dmr", colorCode: 7 }), blankChannel()));
+	assert.equal(d.mode, "dmr");
+	assert.equal(d.colorCode, 7);
+	assert.equal(d.dgid, 0);
+});

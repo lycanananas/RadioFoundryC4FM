@@ -67,7 +67,9 @@ export function decodeChannel(r) {
 	return {
 		name: getName(r, 0, 16),
 		rxHz, txHz,
-		mode: r[0x18] === 1 ? "dmr" : "fm",
+		// mode byte 0 FM, 1 DMR, 2 C4FM (the C4FM fork's); a C4FM channel's DG-ID (0-99) is in the color code byte
+		mode: r[0x18] === 1 ? "dmr" : r[0x18] === 2 ? "c4fm" : "fm",
+		dgid: r[0x18] === 2 && r[0x2C] <= 99 ? r[0x2C] : 0,
 		power: r[0x19],
 		tot: r[0x1B] * 15,
 		rxTone: getTone(r, 0x20),
@@ -78,7 +80,7 @@ export function decodeChannel(r) {
 		zoneSkip: (f4 & 0x20) !== 0,
 		vox: (f4 & 0x40) !== 0,
 		squelch: r[0x37] <= 21 ? r[0x37] : 10,
-		colorCode: r[0x2C] & 0x0F,
+		colorCode: r[0x18] === 2 ? 0 : r[0x2C] & 0x0F,
 		timeslot: r[0x31] & 0x40 ? 2 : 1,
 		contact: u16(r, 0x2E),
 		rxList: r[0x2B],
@@ -106,7 +108,7 @@ export function encodeChannel(c, r) {
 	putName(r, 0, 16, c.name);
 	putFreq(r, 0x10, c.rxHz);
 	putFreq(r, 0x14, c.txHz);
-	r[0x18] = c.mode === "dmr" ? 1 : 0;
+	r[0x18] = c.mode === "dmr" ? 1 : c.mode === "c4fm" ? 2 : 0;
 	r[0x19] = clamp(c.power, 0, 255);
 	r[0x1B] = clamp(Math.ceil((c.tot || 0) / 15), 0, 255);
 	putTone(r, 0x20, c.rxTone);
@@ -114,7 +116,7 @@ export function encodeChannel(c, r) {
 	r[0x33] = (r[0x33] & ~0x76) | (c.bw === 25 ? 0x02 : 0) | (c.rxOnly ? 0x04 : 0) | (c.allSkip ? 0x10 : 0) |
 		(c.zoneSkip ? 0x20 : 0) | (c.vox ? 0x40 : 0);
 	r[0x37] = clamp(c.squelch, 0, 21);
-	r[0x2C] = (r[0x2C] & 0xF0) | (c.colorCode & 0x0F);
+	r[0x2C] = c.mode === "c4fm" ? clamp(c.dgid || 0, 0, 99) : (r[0x2C] & 0xF0) | (c.colorCode & 0x0F);
 	r[0x31] = (r[0x31] & ~0x40) | (c.timeslot === 2 ? 0x40 : 0);
 	put16(r, 0x2E, c.contact || 0);
 	r[0x2B] = clamp(c.rxList || 0, 0, 255);
