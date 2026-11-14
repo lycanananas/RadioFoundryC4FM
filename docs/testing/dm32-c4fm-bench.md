@@ -110,7 +110,8 @@ Through a repeater and Wires-X: check that the network shows the DM-32's callsig
 
 1. On the node's repeater (a C4FM channel with its offset), # on Home: the radio sends a status request and the
    Wires-X page shows the node's name and its room within a few seconds ("no answer" after 6 s).
-2. Room ID, Connect: the Room row shows the room; Disconnect: "none".
+2. Rooms: the node's list (20 a page); OK on one connects. Or Room ID, Connect: the Room row shows the room;
+   Disconnect: "none".
 3. Settling the command format against a Yaesu radio (the DM-32 receives only): put the DM-32 on the repeater's input
    frequency (simplex, no offset), press the Yaesu radio's Wires-X key, then `python3 tools/c4fm_bench.py wx --save
    ft70d-dx`; the same for a connect to a room. The data rows are the Yaesu radio's command, byte for byte. On the

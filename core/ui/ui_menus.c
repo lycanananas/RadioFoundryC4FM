@@ -5516,7 +5516,7 @@ enum { SA_DIAG, SA_FIRMWARE, SA_CODEPLUG, SA_RESET, SA_MY_RADIO, SA_CRASH, SA_LA
        // The mode menus (CONFIG_C4FM): screens opened from a mode's page, and its sub-pages
        SA_LAST_CALLER, SA_CONTACTS, SA_MESSAGES, SA_RECENT, SA_C4FM_HEARD, SA_C4FM_CALL, SA_C4FM_ADV, SA_DMR_DATA,
        // Wires-X (CONFIG_C4FM): the page, and its commands
-       SA_WIRESX, SA_WX_NODE, SA_WX_ROOM, SA_WX_CONNECT, SA_WX_DISCONNECT };
+       SA_WIRESX, SA_WX_NODE, SA_WX_ROOM, SA_WX_CONNECT, SA_WX_DISCONNECT, SA_WX_ROOMS };
 
 typedef struct {
 	const char *name;
@@ -5898,6 +5898,7 @@ static const set_item_t s_c4fm[] = {
 static const set_item_t s_wx[] = {
 	ACTION(TRN("Node"), "Wires-X node status refresh", SA_WX_NODE),
 	ACTION(TRN("Room"), "Wires-X room connected", SA_WX_ROOM),
+	ACTION(TRN("Rooms"), "Wires-X room list active rooms", SA_WX_ROOMS),
 	NUMBER(TRN("Room ID"), "Wires-X room number", UI_SET_WX_ROOM, 0, 9999, 1, NULL),	// to 99999: set_range
 	ACTION(TRN("Connect"), "Wires-X connect room", SA_WX_CONNECT),
 	ACTION(TRN("Disconnect"), "Wires-X disconnect leave room", SA_WX_DISCONNECT),
@@ -6125,6 +6126,70 @@ void ui_open_wiresx(void)
 	}
 	radio_req_c4fm_wx(C4FM_WX_DX, 0);
 	ui_push(SCR_GROUP, group_of(s_wx));
+}
+
+// Menu > C4FM > Wires-X > Rooms: the node's room list, a page of up to 20; OK connects to the room, the last row asks
+// for the next page
+static uint32_t wx_rooms_asked;	// rooms_serial when the list was asked for: until it moves, "waiting"
+
+static bool wx_rooms_more(const radio_wx_view_t *w)
+{
+	return w->rooms_serial != wx_rooms_asked && w->rooms_start + w->rooms <= w->rooms_total && w->rooms > 0;
+}
+
+static uint16_t wx_rooms_count(void)
+{
+	const radio_wx_view_t *w = &ui_view()->c4fm.wx;
+	if (w->rooms_serial == wx_rooms_asked)
+		return 0;
+	return (uint16_t)(w->rooms + (wx_rooms_more(w) ? 1 : 0));
+}
+
+static void wx_rooms_item(uint16_t i, ui_item_t *it)
+{
+	const radio_wx_view_t *w = &ui_view()->c4fm.wx;
+	sbuf_t b;
+	if (i >= w->rooms) {
+		str_copy(it->label, sizeof it->label, TR("Next page"));
+		sb_init(&b, it->value, sizeof it->value);
+		sb_u32(&b, (uint32_t)(w->rooms_start + w->rooms), 1);
+		sb_str(&b, " / ");
+		sb_u32(&b, w->rooms_total, 1);
+		return;
+	}
+	str_copy(it->label, sizeof it->label, w->room[i].name[0] != '\0' ? w->room[i].name : w->room[i].id);
+	sb_init(&b, it->value, sizeof it->value);
+	sb_str(&b, w->room[i].id);
+	if (w->room[i].users) {
+		sb_chr(&b, ' ');
+		sb_u32(&b, w->room[i].users, 1);
+	}
+}
+
+static void wx_rooms_select(uint16_t i, bool hold)
+{
+	(void)hold;
+	const radio_wx_view_t *w = &ui_view()->c4fm.wx;
+	if (i >= w->rooms) {
+		wx_rooms_asked = w->rooms_serial;
+		radio_req_c4fm_wx(C4FM_WX_ALL, (uint32_t)(w->rooms_start + w->rooms));
+		ui_frame()->focus = 0;
+		return;
+	}
+	uint32_t id = 0;
+	for (const char *c = w->room[i].id; *c >= '0' && *c <= '9'; c++)
+		id = id * 10u + (uint32_t)(*c - '0');
+	ui_svc_setting_set(UI_SET_WX_ROOM, (int32_t)id);
+	radio_req_c4fm_wx(C4FM_WX_CONNECT, id);
+	ui_pop();	// back to the Wires-X page, which shows the room once the node answers
+}
+
+static const char *wx_rooms_empty(void)
+{
+	const radio_wx_view_t *w = &ui_view()->c4fm.wx;
+	if (w->rooms_serial == wx_rooms_asked)
+		return w->sent_ms != 0 && hal_millis() - w->sent_ms > 10000u ? TR("No answer from the node") : TR("Asking the node...");
+	return TR("No rooms");
 }
 
 // The status line of the Wires-X page: what the node said last, or that it hasn't answered
@@ -6476,6 +6541,11 @@ static void group_select(uint16_t i, bool hold)
 			break;
 		}
 		case SA_WX_DISCONNECT: radio_req_c4fm_wx(C4FM_WX_DISCONNECT, 0); break;
+		case SA_WX_ROOMS:
+			wx_rooms_asked = ui_view()->c4fm.wx.rooms_serial;
+			radio_req_c4fm_wx(C4FM_WX_ALL, 1);
+			ui_push(SCR_WX_ROOMS, 0);
+			break;
 		case SA_DMR_DATA: ui_push(SCR_GROUP, group_of(s_connections)); break;
 #endif
 		case SA_RESET: ui_push(SCR_CONFIRM, 0); break;
@@ -7030,6 +7100,18 @@ static const ui_scr_def_t c4fm_heard_screen = {
 };
 #endif
 
+#if CONFIG_C4FM
+static const char *wx_rooms_body(void)
+{
+	return wx_rooms_count() == 0 ? wx_rooms_empty() : NULL;
+}
+
+static const ui_scr_def_t wx_rooms_screen = {
+	.name = "wx-rooms", .flags = SF_LIST | SF_FIELD, .prefix = TRN("Rooms"), .hint = TRN("OK connect  Back"),
+	.count = wx_rooms_count, .item = wx_rooms_item, .select = wx_rooms_select, .body = wx_rooms_body,
+};
+#endif
+
 const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 	[SCR_HOME] = &home_screen, [SCR_QUICK] = &quick_screen, [SCR_HUB] = &hub_screen,
 	[SCR_FIND] = &ui_find_screen, [SCR_ACTIONS] = &actions_screen, [SCR_CONTACTS] = &contacts_screen,
@@ -7048,6 +7130,7 @@ const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 	[SCR_DMR_ID] = &dmr_id_screen,
 #if CONFIG_C4FM
 	[SCR_C4FM_HEARD] = &c4fm_heard_screen,
+	[SCR_WX_ROOMS] = &wx_rooms_screen,
 #endif
 #if CONFIG_C4FM && CONFIG_CHANNEL_EDIT
 	[SCR_C4FM_CALL] = &c4fm_call_screen,

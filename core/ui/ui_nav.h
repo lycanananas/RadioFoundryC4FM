@@ -42,6 +42,7 @@ typedef enum {
 	SCR_DATA_SERVICES,		// Settings > Connections > Data services: ARS server, IP gateway (CONFIG_DMR_ARS / _IP_GATEWAY)
 	SCR_C4FM_HEARD,			// Menu > C4FM > Last heard (CONFIG_C4FM)
 	SCR_C4FM_CALL,			// Menu > C4FM > Callsign: the text entry (CONFIG_C4FM)
+	SCR_WX_ROOMS,			// Menu > C4FM > Wires-X > Rooms: the node's room list (CONFIG_C4FM)
 	SCR_COUNT
 } ui_scr_t;
 

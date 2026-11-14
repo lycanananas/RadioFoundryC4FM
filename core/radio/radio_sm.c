@@ -1641,6 +1641,17 @@ static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
 		memcpy(v->wx.node_id, w->node_id, sizeof v->wx.node_id);
 		memcpy(v->wx.room_id, w->room_id, sizeof v->wx.room_id);
 		memcpy(v->wx.room_name, w->room_name, sizeof v->wx.room_name);
+		if (v->wx.rooms_serial != w->rooms_serial) {
+			v->wx.rooms_serial = w->rooms_serial;
+			v->wx.rooms = w->rooms;
+			v->wx.rooms_total = w->rooms_total;
+			v->wx.rooms_start = w->rooms_start;
+			for (unsigned i = 0; i < RADIO_WX_ROOMS && i < C4FM_WX_ROOMS; i++) {
+				memcpy(v->wx.room[i].id, w->room[i].id, sizeof v->wx.room[i].id);
+				memcpy(v->wx.room[i].name, w->room[i].name, sizeof v->wx.room[i].name);
+				v->wx.room[i].users = w->room[i].users;
+			}
+		}
 		v->rx_dgid = cv->dgid;
 		v->rx_dt = cv->dt;
 		v->late_entry = cv->late_entry;

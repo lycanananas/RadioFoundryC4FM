@@ -457,6 +457,124 @@ int main(void)
 		      strcmp(wx->room_name, "POLSKA") == 0 && strcmp(wx->node_call, "SR5WI") == 0 &&
 		      strcmp(wx->node_name, "WARSZAWA") == 0 && strcmp(wx->node_id, "54321") == 0,
 		      "the node's connect reply parsed");
+		// The room list (ALL): a long reply in several blocks, as MMDVM_CM's sendAllReply / createReply send it
+		{
+			static uint8_t all[1200];
+			memset(all, 0, sizeof all);
+			all[0] = 0x00;
+			memcpy(all + 1, "\x5D\x46\x5F\x26", 4);
+			memcpy(all + 5, "21", 2);
+			memcpy(all + 7, "54321", 5);
+			memcpy(all + 12, "SR5WI     ", 10);
+			memcpy(all + 22, "003045", 6);	// 3 on this page, 45 in all
+			all[28] = 0x0D;
+			static const char *const names[3] = { "POLSKA          ", "EUROPE LINK     ", "TEST ROOM       " };
+			static const char *const ids[3] = { "00001", "28617", "40123" };
+			unsigned off = 29;
+			for (int j = 0; j < 3; j++, off += 50) {
+				memset(all + off, ' ', 50);
+				all[off] = '5';
+				memcpy(all + off + 1, ids[j], 5);
+				memcpy(all + off + 6, names[j], 16);
+				memcpy(all + off + 22, j == 1 ? "007" : "000", 3);
+				all[off + 49] = 0x0D;
+			}
+			memset(all + off, ' ', 1029 - off);
+			off = 1029;
+			all[off] = 0x03;
+			uint8_t asum = 0;
+			for (unsigned i = 0; i <= off; i++) {
+				asum = (uint8_t)(asum + all[i]);
+			}
+			all[off + 1] = asum;
+			unsigned length = off + 2;
+			// createReply: one 0x00 more per extra block, rounded to 20 + 40 n
+			unsigned bt = 0;
+			if (length > 260) {
+				bt = 1 + (length - 260) / 259;
+				length += bt;
+			}
+			length = 20 + ((length - 20) / 40 + ((length - 20) % 40 ? 1 : 0)) * 40;
+			static uint8_t air2[120 * 48];
+			uint32_t an = 120;
+			memset(air2, 0x77, 120);
+			uint8_t z20[20];
+			memset(z20, ' ', 20);
+			ysf_fich_t hf = { .fi = YSF_FI_HEADER, .cs = 2, .ft = 7, .bt = (uint8_t)bt, .dt = YSF_DT_DATA_FR };
+			memset(air2 + an, 0, 120);
+			ysfAddSync(air2 + an);
+			ysfFichEncode(&hf, air2 + an);
+			ysfCsdEncode(z20, z20, air2 + an);
+			an += 120;
+			unsigned o = 0, fn = 0, bn = 0;
+			while (o < length) {
+				unsigned rem = length - o;
+				uint8_t ft = rem > 220 ? 7 : rem > 180 ? 6 : rem > 140 ? 5 : rem > 100 ? 4 : rem > 60 ? 3 : rem > 20 ? 2 : 1;
+				static uint8_t cur_ft;
+				if (fn == 0) {
+					cur_ft = ft;
+				}
+				uint8_t *fr = air2 + an;
+				memset(fr, 0, 120);
+				ysf_fich_t cf = { .fi = YSF_FI_COMMS, .cs = 2, .fn = (uint8_t)fn, .ft = cur_ft, .bn = (uint8_t)bn,
+						  .bt = (uint8_t)bt, .dt = YSF_DT_DATA_FR };
+				ysfAddSync(fr);
+				ysfFichEncode(&cf, fr);
+				if (fn == 0) {
+					ysfCsdEncode(z20, z20, fr);
+				} else if (fn == 1) {
+					uint8_t d2[20];
+					if (bn == 0) {
+						memcpy(d2, all + o, 20);
+						o += 20;
+					} else {
+						d2[0] = 0x00;
+						memcpy(d2 + 1, all + o, 19);
+						o += 19;
+					}
+					ysfCsdEncode(z20, d2, fr);
+				} else {
+					ysfCsdEncode(all + o, all + o + 20, fr);
+					o += 40;
+				}
+				an += 120;
+				if (++fn >= 8) {
+					fn = 0;
+					bn++;
+				}
+			}
+			ysf_fich_t tf = { .fi = YSF_FI_TERMINATOR, .cs = 2, .fn = (uint8_t)fn, .bn = (uint8_t)bn, .dt = YSF_DT_DATA_FR };
+			memset(air2 + an, 0, 120);
+			ysfAddSync(air2 + an);
+			ysfFichEncode(&tf, air2 + an);
+			ysfCsdEncode(z20, z20, air2 + an);
+			an += 120;
+			c4fm_mod_t m5;
+			c4fmModInit(&m5, 1800);
+			for (uint32_t b = 0; b < an + 480; b += 24, t += 20) {
+				uint8_t chunk[24];
+				for (int i = 0; i < 24; i++) {
+					chunk[i] = b + (uint32_t)i < an ? air2[b + (uint32_t)i] : 0x77;
+				}
+				int16_t pcm[200];
+				uint32_t n = c4fmModulate(&m5, chunk, 192, pcm);
+				memcpy(rx_audio, pcm, n * sizeof(int16_t));
+				rx_n = (uint16_t)n;
+				c4fm_call_poll(t);
+			}
+			const c4fm_wx_t *wl = c4fm_call_wx_state();
+			printf("Wires-X list: %u rooms of %u in %u blocks: %s '%s' (%u), %s '%s' (%u), %s '%s'\n", wl->rooms,
+			       wl->rooms_total, bn + 1, wl->room[0].id, wl->room[0].name, wl->room[0].users, wl->room[1].id,
+			       wl->room[1].name, wl->room[1].users, wl->room[2].id, wl->room[2].name);
+			CHECK(bn >= 4 && wl->kind == C4FM_WX_ALL && wl->rooms == 3 && wl->rooms_total == 45 &&
+			      strcmp(wl->room[0].id, "00001") == 0 && strcmp(wl->room[0].name, "POLSKA") == 0 &&
+			      strcmp(wl->room[1].id, "28617") == 0 && strcmp(wl->room[1].name, "EUROPE LINK") == 0 &&
+			      wl->room[1].users == 7 && strcmp(wl->room[2].name, "TEST ROOM") == 0,
+			      "the room list over %u blocks parsed", bn + 1);
+		}
+		CHECK(c4fm_wx_command(C4FM_WX_ALL, 21, cmd) == 12 && memcmp(cmd + 5, "01021", 5) == 0,
+		      "ALL command: the page from entry 21");
+		wx = c4fm_call_wx_state();
 		// A reply with a wrong checksum is not taken
 		c4fm_wx_t junk = *wx;
 		rep[90] ^= 1;

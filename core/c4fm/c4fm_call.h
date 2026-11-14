@@ -54,9 +54,17 @@ enum {
 	C4FM_WX_DX,		// the node's status: its name, the room it is in
 	C4FM_WX_CONNECT,	// connect the node to a room (5-digit ID)
 	C4FM_WX_DISCONNECT,	// leave the room
-	C4FM_WX_ALL,		// the list of active rooms (first page)
+	C4FM_WX_ALL,		// the list of active rooms (a page of up to 20 from a 1-based entry)
 };
-#define C4FM_WX_DATA_MAX	320	// a command or reply: FN 1-7 of one block (20 + 6 x 40 bytes)
+#define C4FM_WX_DATA_MAX	320	// a command, and the raw bytes kept for the bench (the first 320 of a reply)
+#define C4FM_WX_RX_MAX		1300	// a reply being received: several blocks (the room list is about 1030 bytes)
+#define C4FM_WX_ROOMS		20	// rooms of one page of the list
+
+typedef struct {
+	char id[6];			// 5 digits
+	char name[17];
+	uint8_t users;			// as the node counts them
+} c4fm_wx_room_t;
 
 // The node's last reply (DX / connect / disconnect)
 typedef struct {
@@ -69,7 +77,11 @@ typedef struct {
 	char node_name[15];		// its name
 	char room_id[6];		// the room's ID, "" when not connected
 	char room_name[17];
-	uint8_t rooms;			// ALL: rooms listed on the first page
+	uint8_t rooms;			// ALL: rooms on this page
+	uint16_t rooms_total;		// ALL: rooms the node knows
+	uint16_t rooms_start;		// ALL: the page's first entry (1-based)
+	uint32_t rooms_serial;		// bumped at every list received
+	c4fm_wx_room_t room[C4FM_WX_ROOMS];
 	// The last command sent and the raw bytes of the last data exchange heard (bench: compare a Yaesu radio's)
 	uint8_t sent;			// C4FM_WX_* last sent, 0xFF none
 	uint32_t sent_ms;
@@ -169,7 +181,7 @@ const c4fm_capture_t *c4fm_call_capture(void);
 void c4fm_call_capture_ctl(uint8_t cmd);
 // The configuration in force (our callsign and DG-ID)
 const c4fm_config_t *c4fm_call_config(void);
-// Send a Wires-X command (C4FM_WX_*; room: the 5-digit room ID for CONNECT). The radio core keys the transmitter first;
+// Send a Wires-X command (C4FM_WX_*; room: the 5-digit room ID for CONNECT, the first entry (1-based) for ALL). The radio core keys the transmitter first;
 // the engine sends when idle or receiving and returns to receive when done (phase C4FM_PHASE_TX_DATA meanwhile).
 // False: not running, no callsign, or transmitting already
 bool c4fm_call_wx(uint8_t cmd, uint32_t room);

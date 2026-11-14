@@ -1219,6 +1219,17 @@ void radio_req_c4fm_wx(uint8_t cmd, uint32_t room)
 	} else if (cmd == 2) {
 		w->connected = false;
 		w->room_id[0] = w->room_name[0] = '\0';
+	}	else if (cmd == 3) {	// C4FM_WX_ALL: a page of three rooms
+		static const char *const ids[3] = { "00001", "28617", "40123" }, *const names[3] = { "POLSKA", "EUROPE LINK", "TEST ROOM" };
+		w->rooms = 3;
+		w->rooms_total = 3;
+		w->rooms_start = 1;
+		for (int i = 0; i < 3; i++) {
+			strcpy(w->room[i].id, ids[i]);
+			strcpy(w->room[i].name, names[i]);
+			w->room[i].users = (uint8_t)(i * 3);
+		}
+		w->rooms_serial++;
 	}
 	serial++;
 }

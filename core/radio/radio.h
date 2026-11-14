@@ -188,6 +188,12 @@ typedef struct {
 enum { RC4FM_IDLE, RC4FM_RX_VOICE, RC4FM_RX_BUSY, RC4FM_TX_VOICE, RC4FM_TX_ENDING, RC4FM_TX_DENIED, RC4FM_TX_DATA };
 
 // Wires-X for the screens: the node's last reply (c4fm_call.h c4fm_wx_t)
+#define RADIO_WX_ROOMS	20
+typedef struct {
+	char id[6];
+	char name[17];
+	uint8_t users;
+} radio_wx_room_t;
 typedef struct {
 	uint32_t serial;	// bumped at every reply
 	uint32_t reply_ms;	// 0 = none yet
@@ -199,6 +205,11 @@ typedef struct {
 	char node_id[6];
 	char room_id[6];
 	char room_name[17];
+	// The room list's last page (ALL)
+	uint32_t rooms_serial;	// bumped at every list
+	uint8_t rooms;
+	uint16_t rooms_total, rooms_start;	// rooms the node knows; this page's first entry (1-based)
+	radio_wx_room_t room[RADIO_WX_ROOMS];
 } radio_wx_view_t;
 
 // C4FM for the screens (docs/spec/c4fm.md): our callsign and DG-ID, the transmission heard

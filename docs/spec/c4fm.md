@@ -130,20 +130,21 @@ of a frame are coded as CSD1 / CSD2 (`ysfCsdEncode`).
 |---|---|
 | Command (ours) | `00`, the command (DX `5D 71 5F` status, CONNECT `5D 23 5F`, DISCONNECT `5D 2A 5F`, ALL `5D 66 5F`), `26`, the parameters in ASCII (CONNECT: the room ID in 5 digits and a space), `03`, the byte sum of all before it |
 | Reply (the node's) | `[1..4]` the reply code (`5D 51 5F 26` DX, `5D 41 5F 26` connect / disconnect), `[5..9]` the node's ID, `[10..19]` its callsign, `[20..33]` its name, `[34..35]` `15` in a room / `12` not, `[36..40]` the room's ID, `[41..56]` its name; `03` and the byte sum |
+| Room list (ALL) | the command's parameters `01` and the first entry in 3 digits; the reply `5D 46 5F 26`, `[22..24]` rooms on the page, `[25..27]` rooms in all, then 50 bytes a room (`[1..5]` ID, `[6..21]` name, `[22..24]` users). About 1030 bytes: several blocks, each next block's FN 1 starting with a `00` before its 19 bytes; BN has 2 bits, so the receiver counts blocks as BN moves on (a fifth block wraps to 0) |
 
 The layout follows a node's implementation (MMDVM_CM `WiresX.cpp`): a node checks the command at `[1..3]` and the
 parameters from `[5]`. Bytes `[0]` and `[4]` of a command are not checked there and copy the replies' layout; a Yaesu
-radio's command captured with `c4fm_bench.py wx` settles them. Replies of more than one block (the room list) aren't
-parsed yet.
+radio's command captured with `c4fm_bench.py wx` settles them. Tried with an MMDVM hotspot (YSFGateway): status,
+connect and the reply work.
 
 | UI | |
 |---|---|
 | # on Home on a C4FM channel or VFO | asks the node for its status (DX) and opens Menu > C4FM > Wires-X |
-| Wires-X page | Node (its name; OK asks again), Room (the room it is in, or none; "waiting..." / "no answer" after a command), Room ID (1-99999, kept), Connect, Disconnect |
+| Wires-X page | Node (its name; OK asks again), Room (the room it is in, or none; "waiting..." / "no answer" after a command), Rooms (the node's list, 20 a page: OK on a room connects to it, the last row asks for the next page), Room ID (five digits, kept), Connect, Disconnect |
 | Keying | a command keys the radio as a short PTT and is refused as PTT would be (band, RX only, no callsign); the refusal clears by itself after 2 s |
 
-`c4fmCallTest` sends CONNECT through the modulator and checks the frames, then plays a node's reply into the receiver
-and checks the room.
+`c4fmCallTest` sends CONNECT through the modulator and checks the frames, then plays a node's replies into the
+receiver: the connect reply (the room) and a room list of five blocks.
 
 ## 6. Radio core, settings, UI
 

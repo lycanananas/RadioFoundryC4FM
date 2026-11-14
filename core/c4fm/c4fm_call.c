@@ -35,8 +35,10 @@ static bool tx_term;		// terminator queued
 
 // Wires-X (docs/spec/c4fm.md 5.1)
 static c4fm_wx_t wx = { .sent = 0xFF };
-static uint8_t wx_rx[C4FM_WX_DATA_MAX];	// a data FR transmission being received: FN 1.. of block 0
+static uint8_t wx_rx[C4FM_WX_RX_MAX];	// a data FR transmission being received: FN 1.. of every block
+static uint16_t wx_rx_len;		// bytes written so far
 static bool wx_rx_on;
+static uint8_t wx_rx_bn, wx_rx_blk;	// the last BN heard and the block count it means (BN has 2 bits: it wraps)
 static bool wx_pending;			// a command asked for, sent once idle
 static uint8_t wx_cmd;
 static uint32_t wx_room;
@@ -229,8 +231,12 @@ uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MA
 		n += 5;
 		out[n++] = ' ';
 	} else if (cmd == C4FM_WX_ALL) {
-		memcpy(out + n, "01001", 5);
-		n += 5;
+		uint32_t start = room == 0 ? 1u : room % 1000u;	// "01" and the first entry, 3 digits
+		out[n++] = '0';
+		out[n++] = '1';
+		out[n++] = (uint8_t)('0' + start / 100u);
+		out[n++] = (uint8_t)('0' + start / 10u % 10u);
+		out[n++] = (uint8_t)('0' + start % 10u);
 	}
 	out[n++] = 0x03;
 	out[n] = wxSum(out, n);
@@ -254,18 +260,52 @@ static void wxText(const uint8_t *src, unsigned n, char *out)
 // room's ID, [41..56] its name; the end marker 0x03 then the byte sum
 bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *w)
 {
+	// The end marker: the last 0x03 whose byte sum checks (the sum itself may be 0x03)
 	int end = -1;
 	for (int i = (int)len - 2; i >= 1; i--) {
-		if (data[i] == 0x03) {
+		if (data[i] == 0x03 && wxSum(data, (uint16_t)(i + 1)) == data[i + 1]) {
 			end = i;
 			break;
 		}
 	}
-	if (end < 0 || wxSum(data, (uint16_t)(end + 1)) != data[end + 1]) {
+	if (end < 0) {
 		return false;
 	}
 	bool dx = data[1] == 0x5D && data[2] == 0x51 && data[3] == 0x5F;
 	bool conn = data[1] == 0x5D && data[2] == 0x41 && data[3] == 0x5F;	// connect and disconnect alike
+	bool all = data[1] == 0x5D && data[2] == 0x46 && data[3] == 0x5F;
+	if (all && end >= 29) {
+		// The room list (MMDVM_CM sendAllReply): [7..11] the node's ID, [12..21] its callsign, [22..24] rooms on this
+		// page, [25..27] rooms in all, [28] CR; then 50 bytes a room: '5', [1..5] its ID, [6..21] its name,
+		// [22..24] its users, [35..48] a description, [49] CR
+		unsigned n = (unsigned)(data[22] - '0') * 100u + (unsigned)(data[23] - '0') * 10u + (unsigned)(data[24] - '0');
+		unsigned total = (unsigned)(data[25] - '0') * 100u + (unsigned)(data[26] - '0') * 10u + (unsigned)(data[27] - '0');
+		if (n > C4FM_WX_ROOMS) {
+			n = C4FM_WX_ROOMS;
+		}
+		unsigned k = 0;
+		for (unsigned j = 0; j < n; j++) {
+			unsigned o = 29u + j * 50u;
+			if (o + 50u > (unsigned)end) {
+				break;
+			}
+			wxText(data + o + 1, 5, w->room[k].id);
+			wxText(data + o + 6, 16, w->room[k].name);
+			unsigned u = 0;
+			for (unsigned i = 22; i < 25; i++) {
+				u = data[o + i] >= '0' && data[o + i] <= '9' ? u * 10u + (unsigned)(data[o + i] - '0') : u;
+			}
+			w->room[k].users = (uint8_t)(u > 255 ? 255 : u);
+			k++;
+		}
+		w->rooms = (uint8_t)k;
+		w->rooms_total = (uint16_t)(total > 999 ? 999 : total);
+		w->kind = C4FM_WX_ALL;
+		w->rooms_serial++;
+		wxText(data + 7, 5, w->node_id);
+		wxText(data + 12, 10, w->node_call);
+		return true;
+	}
 	if ((!dx && !conn) || end < 57) {
 		return false;
 	}
@@ -283,50 +323,70 @@ bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *w)
 	return true;
 }
 
-// A data FR communications frame: FN 1 carries CSD3 and data [0..19], FN 2.. data 40 bytes each (block 0 only: the
-// replies a radio needs fit it); at FN = FT the data is complete
+// A data FR transmission: FN 1 carries CSD3 and data, FN 2-7 40 bytes each; a long reply goes on in further blocks
+// (BN), whose FN 1 starts with a 0x00 before its 19 bytes (MMDVM_CM createReply). Block 0 holds 260 bytes, each next
+// 259. Complete at the terminator, or at FN = FT of a block that isn't full
 static void wxReceive(const uint8_t *frame, const c4fm_frame_info_t *info, const ysf_fich_t *f, bool soft)
 {
-	if (f->fi != YSF_FI_COMMS || f->bn != 0 || f->fn == 0) {
-		if (f->fi == YSF_FI_HEADER) {
-			wx_rx_on = true;
-			memset(wx_rx, 0, sizeof wx_rx);
-		}
+	if (f->fi == YSF_FI_HEADER) {
+		wx_rx_on = true;
+		wx_rx_len = 0;
+		wx_rx_bn = 0;
+		wx_rx_blk = 0;
+		memset(wx_rx, 0, sizeof wx_rx);
 		return;
 	}
-	uint8_t d1[20], d2[20];
-	unsigned ok = soft && info->soft != NULL ? ysfCsdDecodeSoft(info->soft, d1, d2) : ysfCsdDecode(frame, d1, d2);
-	if (f->fn == 1) {
+	// The block: counted as BN moves on, since a reply of five blocks or more wraps BN back to 0
+	if (f->fi == YSF_FI_COMMS && f->bn != wx_rx_bn) {
+		wx_rx_blk = (uint8_t)(wx_rx_blk + ((f->bn - wx_rx_bn) & 3u));
+		wx_rx_bn = f->bn;
+	}
+	bool done = f->fi == YSF_FI_TERMINATOR;
+	if (f->fi == YSF_FI_COMMS && f->fn != 0) {
+		uint8_t d1[20], d2[20];
+		unsigned ok = soft && info->soft != NULL ? ysfCsdDecodeSoft(info->soft, d1, d2) : ysfCsdDecode(frame, d1, d2);
+		unsigned blk = wx_rx_blk;
+		unsigned base = blk == 0 ? 0u : 260u + (blk - 1u) * 259u;
 		wx_rx_on = true;
-		if (ok & 1u) {
-			memcpy(wx.csd3, d1, sizeof wx.csd3);
-		}
-		memcpy(wx_rx, d2, 20);
-	} else {
-		unsigned off = (unsigned)(f->fn - 2) * 40u + 20u;
-		if (off + 40u <= sizeof wx_rx) {
-			memcpy(wx_rx + off, d1, 20);
-			memcpy(wx_rx + off + 20, d2, 20);
-		}
-	}
-	if (f->fn == f->ft && wx_rx_on) {
-		wx_rx_on = false;
-		uint16_t len = (uint16_t)(20u + (f->ft >= 2 ? (unsigned)(f->ft - 1) * 40u : 0u));
-		if (len > sizeof wx_rx) {
-			len = sizeof wx_rx;
-		}
-		memcpy(wx.data, wx_rx, len);
-		wx.data_len = len;
-		c4fm_wx_t parsed = wx;
-		if (c4fm_wx_parse(wx_rx, len, &parsed)) {
-			parsed.serial = wx.serial + 1;
-			parsed.reply_ms = now != 0 ? now : 1;
-			wx = parsed;
+		if (f->fn == 1) {
+			if ((ok & 1u) && blk == 0) {
+				memcpy(wx.csd3, d1, sizeof wx.csd3);
+			}
+			unsigned skip = blk == 0 ? 0u : 1u, n = 20u - skip;
+			if (base + n <= sizeof wx_rx) {
+				memcpy(wx_rx + base, d2 + skip, n);
+				if (base + n > wx_rx_len) {
+					wx_rx_len = (uint16_t)(base + n);
+				}
+			}
 		} else {
-			wx.serial++;	// raw data captured (a command heard, or a reply we don't parse)
+			unsigned off = base + (blk == 0 ? 20u : 19u) + (unsigned)(f->fn - 2) * 40u;
+			if (off + 40u <= sizeof wx_rx) {
+				memcpy(wx_rx + off, d1, 20);
+				memcpy(wx_rx + off + 20, d2, 20);
+				if (off + 40u > wx_rx_len) {
+					wx_rx_len = (uint16_t)(off + 40u);
+				}
+			}
 		}
-		changed();
+		done = f->fn == f->ft && f->ft < 7;
 	}
+	if (!done || !wx_rx_on || wx_rx_len == 0) {
+		return;
+	}
+	wx_rx_on = false;
+	uint16_t len = wx_rx_len;
+	wx.data_len = len < C4FM_WX_DATA_MAX ? len : C4FM_WX_DATA_MAX;
+	memcpy(wx.data, wx_rx, wx.data_len);
+	c4fm_wx_t parsed = wx;
+	if (c4fm_wx_parse(wx_rx, len, &parsed)) {
+		parsed.serial = wx.serial + 1;
+		parsed.reply_ms = now != 0 ? now : 1;
+		wx = parsed;
+	} else {
+		wx.serial++;	// raw data captured (a command heard, or a reply we don't parse)
+	}
+	changed();
 }
 
 static uint8_t frame_vch;	// the frame's VCH triplets corrected (capFrame)
@@ -676,6 +736,9 @@ static void wxTxBegin(void)
 	tx_term = false;
 	wx.sent = wx_cmd;
 	wx.sent_ms = now != 0 ? now : 1;
+	if (wx_cmd == C4FM_WX_ALL) {
+		wx.rooms_start = (uint16_t)(wx_room == 0 ? 1u : wx_room);
+	}
 	view.phase = C4FM_PHASE_TX_DATA;
 	changed();
 }
