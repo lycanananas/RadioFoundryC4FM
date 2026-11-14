@@ -52,6 +52,7 @@ enum {
 	DL_VIEW_C4FM,		// C4FM: the call engine, the receiver, the driver (docs/spec/c4fm.md 8)
 	DL_VIEW_C4FM_RAW,	// C4FM: the last call's fields as sent, in hex
 	DL_VIEW_C4FM_CAP,	// C4FM: the bench capture's state and RAM addresses (c4fm_capture_t)
+	DL_VIEW_C4FM_WX,	// C4FM: Wires-X, the node's last reply and the last data exchange's raw bytes
 	DL_VIEW_COUNT
 };
 #define DL_VIEW_VERSION		5	// bumped when a key changes meaning or goes away (new keys don't bump it)

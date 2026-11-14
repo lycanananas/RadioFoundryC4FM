@@ -109,6 +109,10 @@ extern ui_state_t ui_st;
 extern ui_target_t ui_target;		// the target of SCR_ACTIONS / SCR_COMPOSE
 
 const radio_view_t *ui_view(void);
+#if CONFIG_C4FM
+// Wires-X: ask the node for its status and open its page (ui_menus.c; # on Home in C4FM)
+void ui_open_wiresx(void);
+#endif
 ui_frame_t *ui_frame(void);
 uint8_t ui_depth(void);
 void ui_push(uint8_t scr, uint16_t arg);

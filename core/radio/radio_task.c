@@ -361,6 +361,10 @@ static void post_pair(uint8_t type, int32_t arg, uint32_t arg2, TickType_t wait)
 	send(&req, wait);
 }
 
+#if CONFIG_C4FM
+void radio_req_c4fm_wx(uint8_t cmd, uint32_t room) { post_pair(RREQ_C4FM_WX, cmd, room, 0); }
+#endif
+
 void radio_req_scan(uint8_t cmd) { post(RREQ_SCAN, cmd, 0); }
 void radio_req_scan_vfo(uint32_t lo_hz, uint32_t hi_hz) { post_pair(RREQ_SCAN_VFO, (int32_t)lo_hz, hi_hz, 0); }
 void radio_req_scan_dual(uint16_t pos) { post_pair(RREQ_SCAN, RSCAN_DUAL, pos, 0); }

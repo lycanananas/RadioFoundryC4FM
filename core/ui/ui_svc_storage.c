@@ -315,6 +315,9 @@ int32_t ui_svc_setting_get(uint8_t id)
 		return (st.c4fm_flags & SETTINGS_C4FM_PLAIN) == 0;
 	case UI_SET_C4FM_TEST_TONE:
 		return ambeVoiceTestSignal();
+	case UI_SET_WX_ROOM:
+		settings_read(&st);
+		return st.wx_room <= 99999u ? (int32_t)st.wx_room : 0;
 	case UI_SET_C4FM_DECODER:
 		settings_read(&st);
 		return (st.c4fm_flags & SETTINGS_C4FM_DECODER_MASK) >> SETTINGS_C4FM_DECODER_SHIFT;
@@ -540,6 +543,11 @@ bool ui_svc_setting_set(uint8_t id, int32_t value)
 		return true;
 	case UI_SET_C4FM_TEST_TONE:
 		ambeVoiceSetTestSignal(value != 0);
+		return true;
+	case UI_SET_WX_ROOM:
+		st = settings_begin();
+		st->wx_room = (uint32_t)(value < 0 ? 0 : value > 99999 ? 99999 : value);
+		settings_end(hal_millis());
 		return true;
 #endif
 #if CONFIG_DMR_PRIVACY

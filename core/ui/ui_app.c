@@ -1177,6 +1177,10 @@ bool ui_home_key(const input_event_t *ev)
 			entry_commit();		// # tunes the typed frequency, like OK
 		else if (ui_st.scanning)
 			ui_push(SCR_SCAN, 0);	// skip / stay / always skip (task-flows.md 11)
+#if CONFIG_C4FM
+		else if (view->ch.mode == RADIO_MODE_C4FM)
+			ui_open_wiresx();	// C4FM: # is Wires-X, as on a Yaesu radio (the node's status, its room)
+#endif
 		else
 			open_caller_actions();
 		return true;

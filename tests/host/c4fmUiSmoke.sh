@@ -21,9 +21,12 @@ check "ok 4 down ok" contacts
 check "ok 4 down down down ok" recent
 check "ok 4 down down down down down down down down down ok" group
 check "ok 5" group
-check "ok 5 ok" c4fm-heard
-check "ok 5 down down ok" c4fm-call
-check "ok 5 down down down ok" group
+check "ok 5 down ok" c4fm-heard
+check "ok 5 down down down ok" c4fm-call
+check "ok 5 down down down down ok" group
+# Wires-X: # on Home on a C4FM VFO (Switch to VFO, Quick tile 4 = mode -> C4FM) opens its page; a room and Connect
+check "ok ok quick 4 back ctx" group
+check "ok ok quick 4 back ctx down down ok 2 8 6 1 7 ok down ok" group
 check "ok 7" settings
 check "ok 7 4" group
 check "ok 1" zones

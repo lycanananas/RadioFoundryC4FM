@@ -334,6 +334,135 @@ int main(void)
 		CHECK(c4fm_call_config()->radio_id[0] == '\0', "malformed radio ID refused");
 	}
 
+	// Wires-X (docs/spec/c4fm.md 5.1): A sends CONNECT to room 12345 as data FR frames; a node's reply (the layout of
+	// MMDVM_CM's sendConnectReply) played into B gives the room
+	{
+		uint8_t cmd[C4FM_WX_DATA_MAX];
+		uint16_t cl = c4fm_wx_command(C4FM_WX_CONNECT, 12345, cmd);
+		uint8_t sum = 0;
+		for (int i = 0; i < 12; i++) {
+			sum = (uint8_t)(sum + cmd[i]);
+		}
+		CHECK(cl == 13 && cmd[0] == 0x00 && cmd[1] == 0x5D && cmd[2] == 0x23 && cmd[3] == 0x5F &&
+		      memcmp(cmd + 5, "12345 ", 6) == 0 && cmd[11] == 0x03 && cmd[12] == sum, "CONNECT command bytes");
+		CHECK(c4fm_wx_command(C4FM_WX_DX, 0, cmd) == 7 && cmd[2] == 0x71 && cmd[5] == 0x03, "DX command bytes");
+
+		c4fm_call_stop();
+		c4fm_call_init(&modemA);
+		c4fm_call_set_voice(NULL, NULL);
+		c4fm_config_t cw = { .callsign = "SP9ABC", .dgid = 0, .radio_id = "K7Q2Z" };
+		c4fm_call_configure(&cw);
+		c4fm_call_start();
+		air_n = 0;
+		qn = 0;
+		c4fm_mod_t m3;
+		c4fmModInit(&m3, 2000);
+		CHECK(c4fm_call_wx(C4FM_WX_CONNECT, 12345), "Wires-X command accepted");
+		bool sent = false;
+		for (int tick = 0; tick < 200; tick++, t += 20) {
+			c4fm_call_poll(t);
+			sent |= c4fm_call_transmitting();
+			airTick(&m3);
+			if (sent && !c4fm_call_transmitting() && !keyed) {
+				break;
+			}
+		}
+		CHECK(sent && !keyed && c4fm_call_view()->phase == C4FM_PHASE_IDLE, "command sent, unkeyed, idle");
+		CHECK(c4fm_call_wx_state()->sent == C4FM_WX_CONNECT, "sent command noted");
+		uint32_t p = 0;
+		while (p < air_n && air[p] == 0x77) {
+			p++;
+		}
+		// header, FN 0, FN 1, terminator
+		ysf_fich_t ff;
+		int frames_ok = 0;
+		bool data_ok = false;
+		for (int k = 0; k < 4 && p + 120 <= air_n; k++, p += 120) {
+			if (ysfSyncErrors(air + p) != 0 || !ysfFichDecode(air + p, &ff, NULL) || ff.dt != YSF_DT_DATA_FR || ff.ft != 1) {
+				continue;
+			}
+			frames_ok++;
+			uint8_t d1[20], d2[20];
+			if (ff.fi == YSF_FI_COMMS && ff.fn == 1 && ysfCsdDecode(air + p, d1, d2) == 3u) {
+				data_ok = d2[1] == 0x5D && d2[2] == 0x23 && memcmp(d2 + 5, "12345 ", 6) == 0 &&
+					  d2[11] == 0x03 && memcmp(d1 + 15, "K7Q2Z", 5) == 0;
+			}
+		}
+		CHECK(frames_ok == 4 && data_ok, "on air: 4 data FR frames, FT 1, FN 1 the command and CSD3 the radio ID (%d)",
+		      frames_ok);
+
+		// The node's reply into B
+		uint8_t rep[100];
+		memset(rep, ' ', sizeof rep);
+		rep[0] = 0x00;
+		memcpy(rep + 1, "\x5D\x41\x5F\x26", 4);
+		memcpy(rep + 5, "54321", 5);
+		memcpy(rep + 10, "SR5WI     ", 10);
+		memcpy(rep + 20, "WARSZAWA      ", 14);
+		memcpy(rep + 34, "15", 2);
+		memcpy(rep + 36, "12345", 5);
+		memcpy(rep + 41, "POLSKA          ", 16);
+		memcpy(rep + 57, "000", 3);
+		memcpy(rep + 84, "00000", 5);
+		rep[89] = 0x03;
+		uint8_t rs = 0;
+		for (int i = 0; i < 90; i++) {
+			rs = (uint8_t)(rs + rep[i]);
+		}
+		rep[90] = rs;
+		static uint8_t tx[120 * 8];
+		uint32_t tn = 0;
+		memset(tx, 0x77, 120);
+		tn = 120;
+		uint8_t c1[20], c2[20], c3[20];
+		memset(c1, ' ', 20);
+		memset(c2, ' ', 20);
+		memset(c3, ' ', 20);
+		for (int k = 0; k < 6; k++, tn += 120) {	// header, FN 0-3, terminator (FT 3: 91 bytes)
+			uint8_t *fr = tx + tn;
+			memset(fr, 0, 120);
+			ysf_fich_t rf = { .fi = k == 0 ? YSF_FI_HEADER : k == 5 ? YSF_FI_TERMINATOR : YSF_FI_COMMS, .cs = 2,
+					  .fn = (uint8_t)(k >= 1 && k <= 4 ? k - 1 : 0), .ft = 3, .dt = YSF_DT_DATA_FR };
+			ysfAddSync(fr);
+			ysfFichEncode(&rf, fr);
+			if (rf.fi != YSF_FI_COMMS || rf.fn == 0) {
+				ysfCsdEncode(c1, c2, fr);
+			} else if (rf.fn == 1) {
+				ysfCsdEncode(c3, rep, fr);
+			} else {
+				ysfCsdEncode(rep + 20 + (rf.fn - 2) * 40, rep + 40 + (rf.fn - 2) * 40, fr);
+			}
+		}
+		c4fm_call_stop();
+		c4fm_call_init(&modemB);
+		c4fm_call_configure(&cw);
+		c4fm_call_start();
+		c4fm_mod_t m4;
+		c4fmModInit(&m4, 1800);
+		for (uint32_t b = 0; b < tn + 480; b += 24, t += 20) {
+			uint8_t chunk[24];
+			for (int i = 0; i < 24; i++) {
+				chunk[i] = b + (uint32_t)i < tn ? tx[b + (uint32_t)i] : 0x77;
+			}
+			int16_t pcm[200];
+			uint32_t n = c4fmModulate(&m4, chunk, 192, pcm);
+			memcpy(rx_audio, pcm, n * sizeof(int16_t));
+			rx_n = (uint16_t)n;
+			c4fm_call_poll(t);
+		}
+		const c4fm_wx_t *wx = c4fm_call_wx_state();
+		printf("Wires-X reply: node '%s' '%s' %s, room '%s' '%s', connected %d\n", wx->node_call, wx->node_name,
+		       wx->node_id, wx->room_id, wx->room_name, wx->connected);
+		CHECK(wx->reply_ms != 0 && wx->connected && strcmp(wx->room_id, "12345") == 0 &&
+		      strcmp(wx->room_name, "POLSKA") == 0 && strcmp(wx->node_call, "SR5WI") == 0 &&
+		      strcmp(wx->node_name, "WARSZAWA") == 0 && strcmp(wx->node_id, "54321") == 0,
+		      "the node's connect reply parsed");
+		// A reply with a wrong checksum is not taken
+		c4fm_wx_t junk = *wx;
+		rep[90] ^= 1;
+		CHECK(!c4fm_wx_parse(rep, 100, &junk), "a reply with a bad checksum is refused");
+	}
+
 	printf("c4fmCallTest: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;
 }

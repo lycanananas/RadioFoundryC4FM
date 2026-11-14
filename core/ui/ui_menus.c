@@ -18,6 +18,7 @@
 #include "radio/tones.h"
 #if CONFIG_C4FM
 #include "ui_modes.h"
+#include "c4fm/c4fm_call.h"	// C4FM_WX_*
 #endif
 #include "radio/mic_gain.h"
 #include "radio/ref_trim.h"
@@ -5513,7 +5514,9 @@ static const ui_scr_def_t tools_screen = {
 typedef enum { ST_TOGGLE, ST_LIST, ST_NUMBER, ST_ACTION } set_type_t;
 enum { SA_DIAG, SA_FIRMWARE, SA_CODEPLUG, SA_RESET, SA_MY_RADIO, SA_CRASH, SA_LANGUAGE, SA_HARDWARE, SA_FIXED_POS, SA_DATA_SERVICES,
        // The mode menus (CONFIG_C4FM): screens opened from a mode's page, and its sub-pages
-       SA_LAST_CALLER, SA_CONTACTS, SA_MESSAGES, SA_RECENT, SA_C4FM_HEARD, SA_C4FM_CALL, SA_C4FM_ADV, SA_DMR_DATA };
+       SA_LAST_CALLER, SA_CONTACTS, SA_MESSAGES, SA_RECENT, SA_C4FM_HEARD, SA_C4FM_CALL, SA_C4FM_ADV, SA_DMR_DATA,
+       // Wires-X (CONFIG_C4FM): the page, and its commands
+       SA_WIRESX, SA_WX_NODE, SA_WX_ROOM, SA_WX_CONNECT, SA_WX_DISCONNECT };
 
 typedef struct {
 	const char *name;
@@ -5884,11 +5887,22 @@ static const set_item_t s_dmr[] = {
 };
 // Menu > C4FM
 static const set_item_t s_c4fm[] = {
+	ACTION(TRN("Wires-X"), "C4FM node room connect repeater", SA_WIRESX),
 	ACTION(TRN("Last heard"), "C4FM stations calls heard", SA_C4FM_HEARD),
 	NUMBER(TRN("DG-ID"), "C4FM DGID digital group Fusion", UI_SET_C4FM_DGID, 0, 99, 1, NULL),
 	ACTION(TRN("Callsign"), "C4FM callsign", SA_C4FM_CALL),
 	ACTION(TRN("Advanced"), "C4FM deviation preamble FT-70D test tone debug", SA_C4FM_ADV),
 };
+// Menu > C4FM > Wires-X (and # on Home in C4FM): the node's status, its room; connect and disconnect. Opening it asks
+// the node for its status (a short transmission)
+static const set_item_t s_wx[] = {
+	ACTION(TRN("Node"), "Wires-X node status refresh", SA_WX_NODE),
+	ACTION(TRN("Room"), "Wires-X room connected", SA_WX_ROOM),
+	NUMBER(TRN("Room ID"), "Wires-X room number", UI_SET_WX_ROOM, 0, 9999, 1, NULL),	// to 99999: set_range
+	ACTION(TRN("Connect"), "Wires-X connect room", SA_WX_CONNECT),
+	ACTION(TRN("Disconnect"), "Wires-X disconnect leave room", SA_WX_DISCONNECT),
+};
+
 // Menu > C4FM > Advanced: the bench knobs. Decoder: soft or hard decisions after the software demodulator (the one
 // demodulator there is: the chip's own 4FSK demodulator is not used yet)
 static const int16_t v_decoder[] = { 0, 1 };	// C4FM_DECODER_*
@@ -5969,6 +5983,7 @@ static const set_group_t groups[] = {
 	// The mode pages: last, not listed in Settings (settings_shown); Menu opens them
 	GROUP(TRN("FM"), s_fm), GROUP(TRN("DMR"), s_dmr), GROUP(TRN("C4FM"), s_c4fm),
 	GROUP_T(TRN("C4FM advanced"), TRN("C4FM Advanced"), s_c4fm_adv),
+	GROUP(TRN("Wires-X"), s_wx),
 	GROUP_T(TRN("DMR data"), TRN("DMR Data"), s_connections),
 #endif
 };
@@ -6058,7 +6073,8 @@ static bool settings_shown(uint8_t g)
 {
 #if CONFIG_C4FM
 	const set_item_t *it = groups[g].items;
-	return it != s_fm && it != s_dmr && it != s_c4fm && it != s_c4fm_adv && it != s_connections && it != s_privacy &&
+	return it != s_fm && it != s_dmr && it != s_c4fm && it != s_c4fm_adv && it != s_wx && it != s_connections &&
+	       it != s_privacy &&
 	       it != s_location && it != s_my_radio;
 #else
 	(void)g;
@@ -6098,6 +6114,38 @@ static uint8_t group_of(const set_item_t *items)
 static void open_mode_page(uint8_t mode)
 {
 	ui_push(SCR_GROUP, group_of(mode == RADIO_MODE_FM ? s_fm : mode == RADIO_MODE_DMR ? s_dmr : s_c4fm));
+}
+
+// Wires-X: ask the node for its status and open the page (# on Home in C4FM, Menu > C4FM > Wires-X)
+void ui_open_wiresx(void)
+{
+	if (ui_view()->ch.mode != RADIO_MODE_C4FM) {
+		ui_toast(TR("Wires-X: C4FM channels only"));
+		return;
+	}
+	radio_req_c4fm_wx(C4FM_WX_DX, 0);
+	ui_push(SCR_GROUP, group_of(s_wx));
+}
+
+// The status line of the Wires-X page: what the node said last, or that it hasn't answered
+static void wx_status(const radio_wx_view_t *w, bool room, char *out, size_t len)
+{
+	sbuf_t b;
+	sb_init(&b, out, len);
+	bool waiting = w->sent_ms != 0 && (w->reply_ms == 0 || (int32_t)(w->reply_ms - w->sent_ms) < 0);
+	if (waiting) {
+		sb_str(&b, hal_millis() - w->sent_ms < 6000u ? TR("waiting...") : TR("no answer"));
+	} else if (w->reply_ms == 0) {
+		sb_str(&b, "-");
+	} else if (!room) {
+		sb_str(&b, w->node_name[0] != '\0' ? w->node_name : w->node_call);
+	} else if (w->connected) {
+		sb_str(&b, w->room_id);
+		sb_chr(&b, ' ');
+		sb_str(&b, w->room_name);
+	} else {
+		sb_str(&b, TR("none"));
+	}
 }
 #endif
 
@@ -6268,6 +6316,10 @@ static void set_range(const set_item_t *s, int32_t *lo, int32_t *hi)
 		*lo = 0;
 		*hi = 65535;
 	}
+#if CONFIG_C4FM
+	if (s->id == UI_SET_WX_ROOM)
+		*hi = 99999;	// Wires-X room IDs have five digits (the row's own range is 16 bits)
+#endif
 
 }
 
@@ -6285,6 +6337,8 @@ static void group_item(uint16_t i, ui_item_t *it)
 #if CONFIG_C4FM
 	else if (s->id == SA_C4FM_CALL)
 		str_copy(it->value, sizeof it->value, ui_view()->c4fm.call[0] != '\0' ? ui_view()->c4fm.call : "-");
+	else if (s->id == SA_WX_NODE || s->id == SA_WX_ROOM)
+		wx_status(&ui_view()->c4fm.wx, s->id == SA_WX_ROOM, it->value, sizeof it->value);
 	else if (s->id == SA_MESSAGES && ui_st.unread) {
 		sbuf_t b;
 		sb_init(&b, it->value, sizeof it->value);
@@ -6405,6 +6459,19 @@ static void group_select(uint16_t i, bool hold)
 		case SA_C4FM_HEARD: ui_push(SCR_C4FM_HEARD, 0); break;
 		case SA_C4FM_CALL: c4fm_call_edit(); break;
 		case SA_C4FM_ADV: ui_push(SCR_GROUP, group_of(s_c4fm_adv)); break;
+		case SA_WIRESX: ui_open_wiresx(); break;
+		case SA_WX_NODE:
+		case SA_WX_ROOM: radio_req_c4fm_wx(C4FM_WX_DX, 0); break;
+		case SA_WX_CONNECT: {
+			int32_t room = ui_svc_setting_get(UI_SET_WX_ROOM);
+			if (room <= 0) {
+				ui_toast(TR("Set the room ID first"));
+				break;
+			}
+			radio_req_c4fm_wx(C4FM_WX_CONNECT, (uint32_t)room);
+			break;
+		}
+		case SA_WX_DISCONNECT: radio_req_c4fm_wx(C4FM_WX_DISCONNECT, 0); break;
 		case SA_DMR_DATA: ui_push(SCR_GROUP, group_of(s_connections)); break;
 #endif
 		case SA_RESET: ui_push(SCR_CONFIRM, 0); break;

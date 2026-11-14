@@ -33,6 +33,17 @@ static uint8_t tx_ambe[YSF_VCH_PER_FRAME][YSF_AMBE_BITS];
 static uint8_t tx_have;		// voice frames pulled for the next communications frame
 static bool tx_term;		// terminator queued
 
+// Wires-X (docs/spec/c4fm.md 5.1)
+static c4fm_wx_t wx = { .sent = 0xFF };
+static uint8_t wx_rx[C4FM_WX_DATA_MAX];	// a data FR transmission being received: FN 1.. of block 0
+static bool wx_rx_on;
+static bool wx_pending;			// a command asked for, sent once idle
+static uint8_t wx_cmd;
+static uint32_t wx_room;
+static uint8_t wx_tx[C4FM_WX_DATA_MAX];
+static uint16_t wx_tx_len;
+static uint8_t wx_tx_fn, wx_tx_ft;	// next FN to send, the last
+
 static void changed(void)
 {
 	view.serial++;
@@ -177,6 +188,147 @@ static void capFrame(const c4fm_frame_info_t *info, bool fich, const ysf_fich_t 
 	r->vch = vch;
 }
 
+// --- Wires-X ---
+
+static const uint8_t wx_codes[4][3] = {
+	{ 0x5D, 0x71, 0x5F },	// DX
+	{ 0x5D, 0x23, 0x5F },	// CONNECT
+	{ 0x5D, 0x2A, 0x5F },	// DISCONNECT
+	{ 0x5D, 0x66, 0x5F },	// ALL
+};
+
+static uint8_t wxSum(const uint8_t *d, uint16_t n)
+{
+	uint8_t s = 0;
+	for (uint16_t i = 0; i < n; i++) {
+		s = (uint8_t)(s + d[i]);
+	}
+	return s;
+}
+
+// A command's data: a sequence byte (0), the three-byte command, 0x26, the parameters as ASCII, the end marker
+// 0x03 and the byte sum of everything before it. As a node parses it (MMDVM_CM WiresX.cpp: the command at [1..3],
+// the parameters from [5]: CONNECT the room ID in 6 characters, ALL "01" and the first entry "001"). Bytes [0] and
+// [4] are not checked by a node; they follow its replies' layout (to compare with a Yaesu radio's capture)
+uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MAX])
+{
+	if (cmd > C4FM_WX_ALL) {
+		return 0;
+	}
+	uint16_t n = 0;
+	out[n++] = 0x00;
+	memcpy(out + n, wx_codes[cmd], 3);
+	n += 3;
+	out[n++] = 0x26;
+	if (cmd == C4FM_WX_CONNECT) {
+		room %= 100000u;
+		for (int i = 4; i >= 0; i--) {
+			out[n + (unsigned)i] = (uint8_t)('0' + room % 10u);
+			room /= 10u;
+		}
+		n += 5;
+		out[n++] = ' ';
+	} else if (cmd == C4FM_WX_ALL) {
+		memcpy(out + n, "01001", 5);
+		n += 5;
+	}
+	out[n++] = 0x03;
+	out[n] = wxSum(out, n);
+	return (uint16_t)(n + 1);
+}
+
+static void wxText(const uint8_t *src, unsigned n, char *out)
+{
+	unsigned k = 0;
+	for (unsigned i = 0; i < n; i++) {
+		char c = (char)src[i];
+		out[i] = (c >= 0x20 && c < 0x7F) ? c : ' ';
+	}
+	for (k = n; k > 0 && out[k - 1] == ' '; k--) {
+	}
+	out[k] = '\0';
+}
+
+// A node's reply (MMDVM_CM WiresX.cpp sendDXReply / sendConnectReply / sendDisconnectReply): [1..4] the reply code,
+// [5..9] the node's ID, [10..19] its callsign, [20..33] its name, [34..35] "15" in a room ("12" not), [36..40] the
+// room's ID, [41..56] its name; the end marker 0x03 then the byte sum
+bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *w)
+{
+	int end = -1;
+	for (int i = (int)len - 2; i >= 1; i--) {
+		if (data[i] == 0x03) {
+			end = i;
+			break;
+		}
+	}
+	if (end < 0 || wxSum(data, (uint16_t)(end + 1)) != data[end + 1]) {
+		return false;
+	}
+	bool dx = data[1] == 0x5D && data[2] == 0x51 && data[3] == 0x5F;
+	bool conn = data[1] == 0x5D && data[2] == 0x41 && data[3] == 0x5F;	// connect and disconnect alike
+	if ((!dx && !conn) || end < 57) {
+		return false;
+	}
+	w->kind = dx ? C4FM_WX_DX : (data[34] == '1' && data[35] == '5') ? C4FM_WX_CONNECT : C4FM_WX_DISCONNECT;
+	wxText(data + 5, 5, w->node_id);
+	wxText(data + 10, 10, w->node_call);
+	wxText(data + 20, 14, w->node_name);
+	w->connected = data[34] == '1' && data[35] == '5';
+	if (w->connected) {
+		wxText(data + 36, 5, w->room_id);
+		wxText(data + 41, 16, w->room_name);
+	} else {
+		w->room_id[0] = w->room_name[0] = '\0';
+	}
+	return true;
+}
+
+// A data FR communications frame: FN 1 carries CSD3 and data [0..19], FN 2.. data 40 bytes each (block 0 only: the
+// replies a radio needs fit it); at FN = FT the data is complete
+static void wxReceive(const uint8_t *frame, const c4fm_frame_info_t *info, const ysf_fich_t *f, bool soft)
+{
+	if (f->fi != YSF_FI_COMMS || f->bn != 0 || f->fn == 0) {
+		if (f->fi == YSF_FI_HEADER) {
+			wx_rx_on = true;
+			memset(wx_rx, 0, sizeof wx_rx);
+		}
+		return;
+	}
+	uint8_t d1[20], d2[20];
+	unsigned ok = soft && info->soft != NULL ? ysfCsdDecodeSoft(info->soft, d1, d2) : ysfCsdDecode(frame, d1, d2);
+	if (f->fn == 1) {
+		wx_rx_on = true;
+		if (ok & 1u) {
+			memcpy(wx.csd3, d1, sizeof wx.csd3);
+		}
+		memcpy(wx_rx, d2, 20);
+	} else {
+		unsigned off = (unsigned)(f->fn - 2) * 40u + 20u;
+		if (off + 40u <= sizeof wx_rx) {
+			memcpy(wx_rx + off, d1, 20);
+			memcpy(wx_rx + off + 20, d2, 20);
+		}
+	}
+	if (f->fn == f->ft && wx_rx_on) {
+		wx_rx_on = false;
+		uint16_t len = (uint16_t)(20u + (f->ft >= 2 ? (unsigned)(f->ft - 1) * 40u : 0u));
+		if (len > sizeof wx_rx) {
+			len = sizeof wx_rx;
+		}
+		memcpy(wx.data, wx_rx, len);
+		wx.data_len = len;
+		c4fm_wx_t parsed = wx;
+		if (c4fm_wx_parse(wx_rx, len, &parsed)) {
+			parsed.serial = wx.serial + 1;
+			parsed.reply_ms = now != 0 ? now : 1;
+			wx = parsed;
+		} else {
+			wx.serial++;	// raw data captured (a command heard, or a reply we don't parse)
+		}
+		changed();
+	}
+}
+
 static uint8_t frame_vch;	// the frame's VCH triplets corrected (capFrame)
 
 static void onFrameBody(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_t *info, ysf_fich_t *f_out,
@@ -216,6 +368,9 @@ static void onFrameBody(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_i
 
 	bool ours = cfg.dgid == 0 || f.dgid == cfg.dgid;
 	bool dn = f.dt == YSF_DT_VD2;
+	if (f.dt == YSF_DT_DATA_FR && fich) {
+		wxReceive(frame, info, &f, soft);
+	}
 
 	switch (f.fi) {
 	case YSF_FI_HEADER: {
@@ -455,6 +610,103 @@ static void commsFrame(void)
 	tx_fn = (uint8_t)(tx_fn >= C4FM_FT ? 0 : tx_fn + 1);
 }
 
+// A data FR frame of the command being sent: FI, FN; header, FN 0 and terminator carry CSD1 / CSD2, FN 1 CSD3 and
+// data [0..19], FN 2.. 40 bytes each (space padded)
+static void wxFrame(uint8_t fi, uint8_t fn, uint8_t frame[YSF_FRAME_BYTES])
+{
+	uint8_t c1[20], c2[20];
+	if (fi != YSF_FI_COMMS || fn == 0) {
+		destField(c1);
+		c4fm_callsign_field(cfg.callsign, c1 + 10);
+		memset(c2, ' ', sizeof c2);
+	} else if (fn == 1) {
+		memset(c1, ' ', sizeof c1);	// CSD3: remarks 1-4, our radio ID last (as DCH FN 4-5 in DN)
+		if (!cfg.plain) {
+			radioId(c1 + 15);
+		}
+		memset(c2, ' ', sizeof c2);
+		memcpy(c2, wx_tx, wx_tx_len < 20 ? wx_tx_len : 20);
+	} else {
+		unsigned off = (unsigned)(fn - 2) * 40u + 20u;
+		memset(c1, ' ', sizeof c1);
+		memset(c2, ' ', sizeof c2);
+		for (unsigned i = 0; i < 20; i++) {
+			if (off + i < wx_tx_len) {
+				c1[i] = wx_tx[off + i];
+			}
+			if (off + 20 + i < wx_tx_len) {
+				c2[i] = wx_tx[off + 20 + i];
+			}
+		}
+	}
+	ysf_fich_t f;
+	fichFor(fi, fn, &f);
+	f.dt = YSF_DT_DATA_FR;
+	f.ft = wx_tx_ft;
+	memset(frame, 0, YSF_FRAME_BYTES);
+	ysfAddSync(frame);
+	ysfFichEncode(&f, frame);
+	ysfCsdEncode(c1, c2, frame);
+}
+
+static void wxTxBegin(void)
+{
+	wx_pending = false;
+	callEnd();
+	wx_tx_len = c4fm_wx_command(wx_cmd, wx_room, wx_tx);
+	if (modem == NULL || cfg.callsign[0] == '\0' || wx_tx_len == 0 || !modem->tx_start()) {
+		view.phase = C4FM_PHASE_TX_DENIED;
+		changed();
+		return;
+	}
+	// FT: FN 1 holds 20 bytes, each next FN 40
+	wx_tx_ft = 1;
+	while (20u + (unsigned)(wx_tx_ft - 1) * 40u < wx_tx_len && wx_tx_ft < 7) {
+		wx_tx_ft++;
+	}
+	uint8_t pre[C4FM_PREAMBLE_BYTES];
+	memset(pre, 0x77, sizeof pre);
+	for (uint16_t ms = 0; ms < cfg.preamble_ms; ms += 100) {
+		txWrite(pre, sizeof pre);
+	}
+	uint8_t frame[YSF_FRAME_BYTES];
+	wxFrame(YSF_FI_HEADER, 0, frame);
+	txWrite(frame, sizeof frame);
+	wx_tx_fn = 0;
+	tx_term = false;
+	wx.sent = wx_cmd;
+	wx.sent_ms = now != 0 ? now : 1;
+	view.phase = C4FM_PHASE_TX_DATA;
+	changed();
+}
+
+static void wxTxService(void)
+{
+	uint8_t frame[YSF_FRAME_BYTES];
+	if (wx_tx_fn <= wx_tx_ft) {
+		if (modem->tx_space() >= YSF_FRAME_BYTES) {
+			wxFrame(YSF_FI_COMMS, wx_tx_fn, frame);
+			txWrite(frame, sizeof frame);
+			wx_tx_fn++;
+		}
+		return;
+	}
+	if (!tx_term) {
+		if (modem->tx_space() >= YSF_FRAME_BYTES) {
+			wxFrame(YSF_FI_TERMINATOR, 0, frame);
+			txWrite(frame, sizeof frame);
+			tx_term = true;
+		}
+		return;
+	}
+	if (modem->tx_queued() == 0) {
+		modem->tx_stop();
+		c4fmDemodReset(&demod);
+		view.phase = C4FM_PHASE_IDLE;
+		changed();
+	}
+}
+
 static void txBegin(void)
 {
 	callEnd();
@@ -484,6 +736,10 @@ static void txBegin(void)
 
 static void txService(void)
 {
+	if (view.phase == C4FM_PHASE_TX_DATA) {
+		wxTxService();
+		return;
+	}
 	if (view.phase == C4FM_PHASE_TX_VOICE) {
 		pullVoice();
 		// A whole frame of voice, or the air about to run out: send. One frame per poll at most
@@ -529,6 +785,9 @@ void c4fm_call_init(const hal_c4fm_t *m)
 	modem = m;
 	memset(&view, 0, sizeof view);
 	memset(&raw, 0, sizeof raw);
+	memset(&wx, 0, sizeof wx);
+	wx.sent = 0xFF;
+	wx_pending = false;
 	c4fmDemodInit(&demod, onFrame, onLost, NULL);
 	running = false;
 	ptt = false;
@@ -609,7 +868,23 @@ void c4fm_call_ptt(bool down)
 
 bool c4fm_call_transmitting(void)
 {
-	return view.phase == C4FM_PHASE_TX_VOICE || view.phase == C4FM_PHASE_TX_ENDING;
+	return view.phase == C4FM_PHASE_TX_VOICE || view.phase == C4FM_PHASE_TX_ENDING || view.phase == C4FM_PHASE_TX_DATA;
+}
+
+bool c4fm_call_wx(uint8_t cmd, uint32_t room)
+{
+	if (!running || cfg.callsign[0] == '\0' || cmd > C4FM_WX_ALL || c4fm_call_transmitting()) {
+		return false;
+	}
+	wx_cmd = cmd;
+	wx_room = room;
+	wx_pending = true;
+	return true;
+}
+
+const c4fm_wx_t *c4fm_call_wx_state(void)
+{
+	return &wx;
 }
 
 void c4fm_call_poll(uint32_t now_ms)
@@ -618,11 +893,14 @@ void c4fm_call_poll(uint32_t now_ms)
 	if (!running) {
 		return;
 	}
-	if (ptt && (view.phase == C4FM_PHASE_IDLE || view.phase == C4FM_PHASE_RX_VOICE ||
-		    view.phase == C4FM_PHASE_RX_BUSY)) {
+	bool can_start = view.phase == C4FM_PHASE_IDLE || view.phase == C4FM_PHASE_RX_VOICE ||
+			 view.phase == C4FM_PHASE_RX_BUSY;
+	if (ptt && can_start) {
 		txBegin();
+	} else if (wx_pending && can_start) {
+		wxTxBegin();
 	}
-	if (!ptt && view.phase == C4FM_PHASE_TX_DENIED) {
+	if (!ptt && !wx_pending && view.phase == C4FM_PHASE_TX_DENIED) {
 		view.phase = C4FM_PHASE_IDLE;
 		changed();
 	}

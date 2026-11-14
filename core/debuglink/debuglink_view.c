@@ -543,7 +543,7 @@ static const char *const section_names[DL_VIEW_COUNT] = { "core", "channel", "dm
 						  "dmr_data_stats", "roam", "aprs", "aprs_set", "dmr_ip", "net", "snmp", "usrp",
 						  "sfr", "tasks", "crash", "watchdog", "reset", "air", "net_svc",
 						  "net_link", "cps", "board", "audio", "c4fm",
-						  "c4fm_raw", "c4fm_cap" };
+						  "c4fm_raw", "c4fm_cap", "c4fm_wx" };
 
 const char *debuglink_view_name(uint8_t section)
 {
@@ -662,6 +662,9 @@ void debuglink_view_section(uint8_t section, const radio_view_t *v, dl_text_t *t
 		break;
 	case DL_VIEW_C4FM_CAP:
 		debuglink_view_c4fm(2, t);
+		break;
+	case DL_VIEW_C4FM_WX:
+		debuglink_view_c4fm(3, t);
 		break;
 	case DL_VIEW_USRP:
 #if CONFIG_NET_USRP

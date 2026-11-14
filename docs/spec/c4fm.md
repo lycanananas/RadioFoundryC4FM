@@ -119,6 +119,32 @@ the 72-bit DMR air frame with `ambeFec`, which is lossless both ways. `c4fmCallT
 modulator and receiver; every voice frame arrives in order and unchanged, the header and late entry give the caller,
 another DG-ID doesn't play.
 
+### 5.1 Wires-X
+
+A radio controls its Wires-X node with short data transmissions: data FR mode (FICH DT 1), the same frame layout
+both ways. The header, FN 0 and the terminator carry CSD1 / CSD2 (as a DN header); FN 1 carries CSD3 (remarks 1-4:
+spaces, our radio ID last) and data bytes 0-19; each next FN 40 bytes. FT is the last FN. The two 20-byte channels
+of a frame are coded as CSD1 / CSD2 (`ysfCsdEncode`).
+
+| Data | |
+|---|---|
+| Command (ours) | `00`, the command (DX `5D 71 5F` status, CONNECT `5D 23 5F`, DISCONNECT `5D 2A 5F`, ALL `5D 66 5F`), `26`, the parameters in ASCII (CONNECT: the room ID in 5 digits and a space), `03`, the byte sum of all before it |
+| Reply (the node's) | `[1..4]` the reply code (`5D 51 5F 26` DX, `5D 41 5F 26` connect / disconnect), `[5..9]` the node's ID, `[10..19]` its callsign, `[20..33]` its name, `[34..35]` `15` in a room / `12` not, `[36..40]` the room's ID, `[41..56]` its name; `03` and the byte sum |
+
+The layout follows a node's implementation (MMDVM_CM `WiresX.cpp`): a node checks the command at `[1..3]` and the
+parameters from `[5]`. Bytes `[0]` and `[4]` of a command are not checked there and copy the replies' layout; a Yaesu
+radio's command captured with `c4fm_bench.py wx` settles them. Replies of more than one block (the room list) aren't
+parsed yet.
+
+| UI | |
+|---|---|
+| # on Home on a C4FM channel or VFO | asks the node for its status (DX) and opens Menu > C4FM > Wires-X |
+| Wires-X page | Node (its name; OK asks again), Room (the room it is in, or none; "waiting..." / "no answer" after a command), Room ID (1-99999, kept), Connect, Disconnect |
+| Keying | a command keys the radio as a short PTT and is refused as PTT would be (band, RX only, no callsign); the refusal clears by itself after 2 s |
+
+`c4fmCallTest` sends CONNECT through the modulator and checks the frames, then plays a node's reply into the receiver
+and checks the room.
+
 ## 6. Radio core, settings, UI
 
 | Item | |
@@ -126,7 +152,7 @@ another DG-ID doesn't play.
 | Mode | `RADIO_MODE_C4FM`, offered with `board.c4fm`. The VFO's Mode tile cycles FM -> C4FM -> DMR |
 | Board | `set_mode(C4FM)`: the RF side as for DMR, then the C4FM modem. PTT keys the board as for DMR (`key_tx` at 12.5 kHz); the engine starts the stream; the core unkeys once the engine is off the air |
 | State | RX / TX follow the engine's phase; the time-out stops the transmission with its terminator |
-| Settings | `settings_t`: `c4fm_dgid`, `c4fm_tx_level` (%, 0 = 100), `c4fm_preamble` (100 ms units, 0 = 1), `voice_rx_gain` (dB), `c4fm_flags` (bit 0 plain fields, bits 1-2 the decoder), `c4fm_call` ("" = the radio name's first word). An older record reads 0: the defaults |
+| Settings | `settings_t`: `wx_room` (the Wires-X room ID entered), `c4fm_dgid`, `c4fm_tx_level` (%, 0 = 100), `c4fm_preamble` (100 ms units, 0 = 1), `voice_rx_gain` (dB), `c4fm_flags` (bit 0 plain fields, bits 1-2 the decoder), `c4fm_call` ("" = the radio name's first word). An older record reads 0: the defaults |
 | Power | on a C4FM channel or VFO the power key steps L -> M -> H (the board's levels of those names); FM and DMR keep every level |
 | Channel editor | Mode cycles FM -> DMR -> C4FM; a C4FM channel shows DG-ID (0-99) in place of DMR's and FM's rows. The web codeplug editor (`site/static/js/editor`) has the same mode and field |
 | Home | talk row: our callsign and DG-ID, or the caller's while receiving; chips: DN, power, 12.5k; activity: the caller and the mode heard, then "Last heard" |
@@ -140,7 +166,7 @@ The menus in the C4FM build (`core/ui/ui_menus.c`, `ui_modes.c`):
 | Zones, Channels | as in RadioFoundry |
 | FM | default squelch, busy lockout, roger beep; the channel or VFO in use (FM only): 25 kHz, RX / TX tone (CTCSS / DCS), the VFO's repeater offset |
 | DMR | last caller, contacts, messages, recent, DMR ID and name, reply window, monitor, talker alias, talk permit tone, Data and messages (radio checks, call alerts, SMS format) |
-| C4FM | Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
+| C4FM | Wires-X (5.1), Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
 | Tools | as in RadioFoundry |
 | Settings | the shared groups: Sound, Display, Talk & listen (TX timeout, VFO step), Digital voice (mic gain, AGC, noise reduction, voice volume), Power saving, Keys, Key lock, Advanced |
 

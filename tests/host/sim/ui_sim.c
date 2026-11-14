@@ -1201,6 +1201,28 @@ void radio_req_zone_pos(uint16_t pos) { retune(); view.vfo = false; view.zone_po
 void radio_req_zone(uint16_t index) { retune(); view.zone_index = index; view.zone_pos = 0; load_channel(); }
 static void sim_vfo(bool on);
 void radio_req_vfo(bool on) { retune(); sim_vfo(on); }
+#if CONFIG_C4FM
+// Wires-X in the simulator: the node answers at once (a node "SIM NODE"; CONNECT joins the room, DISCONNECT leaves)
+void radio_req_c4fm_wx(uint8_t cmd, uint32_t room)
+{
+	radio_wx_view_t *w = &view.c4fm.wx;
+	w->sent = cmd;
+	w->sent_ms = w->reply_ms = 1;
+	w->serial++;
+	strcpy(w->node_name, "SIM NODE");
+	strcpy(w->node_call, "N0CALL");
+	strcpy(w->node_id, "12345");
+	if (cmd == 1) {	// C4FM_WX_CONNECT
+		w->connected = true;
+		snprintf(w->room_id, sizeof w->room_id, "%05u", (unsigned)(room % 100000u));
+		strcpy(w->room_name, "TEST ROOM");
+	} else if (cmd == 2) {
+		w->connected = false;
+		w->room_id[0] = w->room_name[0] = '\0';
+	}
+	serial++;
+}
+#endif
 static void sim_vfo(bool on)
 {
 	view.vfo = on;
@@ -2392,7 +2414,7 @@ static bool check(const char *kv, char *err, size_t len)
 	else if (strcmp(key, "vfo") == 0) snprintf(got, sizeof got, "%u", view.vfo);
 	else if (strcmp(key, "freq") == 0) snprintf(got, sizeof got, "%u", (unsigned)view.ch.rx_hz);
 	else if (strcmp(key, "txfreq") == 0) snprintf(got, sizeof got, "%u", (unsigned)view.ch.tx_hz);
-	else if (strcmp(key, "mode") == 0) snprintf(got, sizeof got, "%s", view.ch.mode == RADIO_MODE_DMR ? "dmr" : "fm");
+	else if (strcmp(key, "mode") == 0) snprintf(got, sizeof got, "%s", view.ch.mode == RADIO_MODE_DMR ? "dmr" : view.ch.mode == RADIO_MODE_C4FM ? "c4fm" : "fm");
 	else if (strcmp(key, "tx") == 0) snprintf(got, sizeof got, "%u", (unsigned)sim_rec.tx_count);
 	else if (strcmp(key, "txid") == 0) snprintf(got, sizeof got, "%u", (unsigned)sim_rec.tx_id);
 	else if (strcmp(key, "txpriv") == 0) snprintf(got, sizeof got, "%u", sim_rec.tx_private);

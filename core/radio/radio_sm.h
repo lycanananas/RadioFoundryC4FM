@@ -163,6 +163,7 @@ typedef enum {
 	RREQ_WAKE,		// radio_task.c: tick now (a DMR transmission ended: dmr_call_set_wake); never radio_sm_request
 	RREQ_VOLUME_HOLD,	// arg: 1 hold the level and ignore the knob (keys locked), 0 follow it again
 	RREQ_VFO_SFR,		// the VFO's SFR role (CONFIG_SFR): arg = byte A, as a channel's (sfr.h); VFO only
+	RREQ_C4FM_WX,		// a Wires-X command on the C4FM channel (CONFIG_C4FM): arg = C4FM_WX_*, arg2 = room ID
 } radio_req_type_t;
 
 // RREQ_TONE's argument: which (RADIO_TONE_*) in bits 25:24, the tone type in 23:16, the value in 15:0
@@ -372,6 +373,7 @@ typedef struct {
 	uint16_t c4fm_preamble_ms;	// the settings' preamble
 	bool c4fm_plain;		// the settings' plain fields (not an FT-70D's)
 	uint8_t c4fm_decoder;		// the settings' decoder (C4FM_DECODER_*)
+	uint32_t c4fm_wx_deny_ms;	// a Wires-X command refused at this time (no PTT to clear it): 0 = none
 	char c4fm_call[11];		// the settings' callsign, "" = the radio name's first word
 #endif
 	bool sfr_rpt;			// the channel's SFR repeater role has the modem (radio_sfr.c), not the call stack

@@ -88,6 +88,25 @@ void debuglink_view_c4fm(uint8_t part, dl_text_t *t)
 		counters(t);
 	} else if (part == 1) {
 		rawFields(t);
+	} else if (part == 3) {
+		// Wires-X (c4fm_call.h c4fm_wx_t): the node's last reply, the last command sent, the raw data heard
+		const c4fm_wx_t *w = c4fm_call_wx_state();
+		dl_text(t, "wx.serial=%u\nwx.reply_ms=%u\nwx.kind=%u\nwx.connected=%u\nwx.sent=%u\nwx.sent_ms=%u\n",
+			(unsigned)w->serial, (unsigned)w->reply_ms, w->kind, w->connected, w->sent, (unsigned)w->sent_ms);
+		dl_text_kv_str(t, "wx.node_id", w->node_id);
+		dl_text_kv_str(t, "wx.node_call", w->node_call);
+		dl_text_kv_str(t, "wx.node_name", w->node_name);
+		dl_text_kv_str(t, "wx.room_id", w->room_id);
+		dl_text_kv_str(t, "wx.room_name", w->room_name);
+		hexField(t, "wx.csd3", w->csd3, 20, true);
+		dl_text(t, "wx.data_len=%u\n", w->data_len);
+		for (unsigned off = 0; off < w->data_len; off += 20) {
+			char key[16] = "wx.data_000";
+			key[8] = (char)('0' + off / 100);
+			key[9] = (char)('0' + off / 10 % 10);
+			key[10] = (char)('0' + off % 10);
+			hexField(t, key, w->data + off, w->data_len - off < 20 ? w->data_len - off : 20, true);
+		}
 	} else {
 		// The capture (c4fm_call.h): samples int16 x C4FM_CAP_SAMPLES at cap.samples, the oldest at head once frozen;
 		// frame records c4fm_cap_frame_t x C4FM_CAP_FRAMES at cap.frames, the next written at frame_head % N

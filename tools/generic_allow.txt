@@ -144,3 +144,4 @@ site/tests/stocklayouts.test.mjs a build named by its stock file in a comment
 
 # One section of a generic doc that names radios on purpose (owner-approved): path#anchor, that section only.
 docs/spec/sfr.md#6-known-issues-by-radio the per-radio known issues of the experimental standalone SFR
+tools/c4fm_flash.sh the C4FM fork's build-and-flash helper for the one radio the fork supports

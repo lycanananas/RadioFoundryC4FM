@@ -14,6 +14,7 @@ what they mean, and keeps every record as JSON in a log directory outside the re
                                               speaker and mic; talk; plug it back in, radio left on)
     c4fm_bench.py end [--note TEXT]           counters after: the record (receive and transmit), saved
     c4fm_bench.py fields [--compare FILE]     the last call's fields (FICH, CSD, DCH) decoded, byte for byte
+    c4fm_bench.py wx [--save LABEL]           Wires-X: the node's last reply and the last data exchange heard, raw
     c4fm_bench.py knobs                       the voice and TX settings in force
     c4fm_bench.py set mic-gain 0..10          mic gain step (5 = unity, 2 dB a step), RAM only
     c4fm_bench.py set nr on|off               vocoder noise reduction, RAM only
@@ -372,6 +373,28 @@ def cmd_fields(dl, args):
         print(f"saved {save(args, rec)}")
 
 
+def cmd_wx(dl, args):
+    v = dl.view(["c4fm_wx"])
+    kinds = {0: "DX", 1: "CONNECT", 2: "DISCONNECT", 3: "ALL", 255: "-"}
+    print(f"node {v.get('wx.node_call', '')} '{v.get('wx.node_name', '')}' id {v.get('wx.node_id', '')} | "
+          f"{'in room ' + v.get('wx.room_id', '') + ' ' + v.get('wx.room_name', '') if v.get('wx.connected') == '1' else 'not in a room'}"
+          f" | last reply {kinds.get(num(v.get('wx.kind')), '?')} at {v.get('wx.reply_ms')} ms, "
+          f"last sent {kinds.get(num(v.get('wx.sent')), '?')} at {v.get('wx.sent_ms')} ms")
+    print(f"csd3     {v.get('wx.csd3', '')}  {field_text(bytes.fromhex(v.get('wx.csd3', '') or ''))}")
+    data = b""
+    for off in range(0, num(v.get("wx.data_len")), 20):
+        h = v.get(f"wx.data_{off:03d}", "")
+        if h and h != "-":
+            data += bytes.fromhex(h)
+    for off in range(0, len(data), 20):
+        chunk = data[off:off + 20]
+        print(f"data {off:3d} {chunk.hex()}  {field_text(chunk)}")
+    if args.save:
+        rec = {"kind": "wx", "label": args.save, "note": "", "time": datetime.datetime.now().isoformat(timespec="seconds"),
+               "wx": {k: val for k, val in v.items()}, "data": data.hex()}
+        print(f"saved {save(args, rec)}")
+
+
 def cmd_knobs(dl, args):
     for k, v in knobs(snapshot(dl), dl).items():
         print(f"  {k:16s} {v}")
@@ -476,6 +499,8 @@ def main():
     f = sub.add_parser("fields")
     f.add_argument("--compare", metavar="FILE", help="a saved record (JSON) to compare with, field by field")
     f.add_argument("--save", metavar="LABEL", help="also save these fields as a record")
+    x = sub.add_parser("wx")
+    x.add_argument("--save", metavar="LABEL")
     sub.add_parser("knobs")
     s = sub.add_parser("set")
     s.add_argument("what", choices=["mic-gain", "nr", "agc", "tone", "level"])
@@ -490,7 +515,7 @@ def main():
     try:
         with rd.DebugLink(args.port) as dl:
             if True:
-                {"begin": cmd_begin, "end": cmd_end, "setup": cmd_setup, "status": cmd_status, "watch": cmd_watch, "fields": cmd_fields, "knobs": cmd_knobs,
+                {"wx": cmd_wx, "begin": cmd_begin, "end": cmd_end, "setup": cmd_setup, "status": cmd_status, "watch": cmd_watch, "fields": cmd_fields, "knobs": cmd_knobs,
                  "set": cmd_set}[args.cmd](dl, args)
     except rd.DebugLinkError as e:
         sys.exit(f"debug link: {e}")

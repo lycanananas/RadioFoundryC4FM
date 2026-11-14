@@ -59,6 +59,7 @@ at the same level and distance from the microphone. `report` collects the day's 
 | `setup --qrg MHZ --call CALL [--power L\|M\|H]` | VFO, mode C4FM, power; shows and checks the callsign and DG-ID |
 | `status [--all]`, `watch` | the state in two lines (every counter with `--all`); live per second |
 | `begin LABEL`, `end --note "..."` | counters before and after a test; `end` warns when the radio restarted in between |
+| `wx [--save LABEL]` | Wires-X: the node's last reply and the raw bytes of the last data exchange heard |
 | `fields [--compare FILE] [--save LABEL]` | the last call's FICH, CSD1 / CSD2 and DCH per FN in hex and text (`_` space, `<00>` other bytes) |
 | `knobs`, `set mic-gain N`, `set nr on\|off`, `set agc on\|off`, `set tone on\|off`, `set level PCT` | the voice and TX settings, RAM only |
 | `report` | the day's records as one Markdown file |
@@ -104,6 +105,16 @@ The transmit verdict: padded over 2 % is choppy audio; a mic peak over -1 dBFS i
 
 `begin t3-fields`, the other radio transmits 3 s, `end`: the record keeps its fields. `fields` shows the last call's.
 Through a repeater and Wires-X: check that the network shows the DM-32's callsign.
+
+### T5. Wires-X
+
+1. On the node's repeater (a C4FM channel with its offset), # on Home: the radio sends a status request and the
+   Wires-X page shows the node's name and its room within a few seconds ("no answer" after 6 s).
+2. Room ID, Connect: the Room row shows the room; Disconnect: "none".
+3. Settling the command format against a Yaesu radio (the DM-32 receives only): put the DM-32 on the repeater's input
+   frequency (simplex, no offset), press the Yaesu radio's Wires-X key, then `python3 tools/c4fm_bench.py wx --save
+   ft70d-dx`; the same for a connect to a room. The data rows are the Yaesu radio's command, byte for byte. On the
+   output frequency the same command shows the node's reply.
 
 ### T4. Receiver captures (receive only)
 

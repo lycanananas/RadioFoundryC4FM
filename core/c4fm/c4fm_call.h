@@ -46,7 +46,37 @@ typedef enum {
 	C4FM_PHASE_TX_VOICE,
 	C4FM_PHASE_TX_ENDING,	// terminator queued, playing out
 	C4FM_PHASE_TX_DENIED,	// the modem refused to key: release PTT to clear
+	C4FM_PHASE_TX_DATA,	// sending a Wires-X command (data FR frames), unkeys when done
 } c4fm_phase_t;
+
+// Wires-X (docs/spec/c4fm.md 5.1): the commands a radio sends its node, as data FR transmissions
+enum {
+	C4FM_WX_DX,		// the node's status: its name, the room it is in
+	C4FM_WX_CONNECT,	// connect the node to a room (5-digit ID)
+	C4FM_WX_DISCONNECT,	// leave the room
+	C4FM_WX_ALL,		// the list of active rooms (first page)
+};
+#define C4FM_WX_DATA_MAX	320	// a command or reply: FN 1-7 of one block (20 + 6 x 40 bytes)
+
+// The node's last reply (DX / connect / disconnect)
+typedef struct {
+	uint32_t serial;		// bumped at every reply
+	uint32_t reply_ms;		// when it came, 0 = none yet
+	uint8_t kind;			// C4FM_WX_*: what it answered
+	bool connected;			// the node is in a room
+	char node_id[6];		// the node's 5-digit ID
+	char node_call[11];		// its callsign
+	char node_name[15];		// its name
+	char room_id[6];		// the room's ID, "" when not connected
+	char room_name[17];
+	uint8_t rooms;			// ALL: rooms listed on the first page
+	// The last command sent and the raw bytes of the last data exchange heard (bench: compare a Yaesu radio's)
+	uint8_t sent;			// C4FM_WX_* last sent, 0xFF none
+	uint32_t sent_ms;
+	uint16_t data_len;
+	uint8_t data[C4FM_WX_DATA_MAX];
+	uint8_t csd3[20];
+} c4fm_wx_t;
 
 typedef struct {
 	char callsign[C4FM_CALLSIGN_LEN + 1];	// ours, upper case; "" = can't transmit
@@ -139,7 +169,16 @@ const c4fm_capture_t *c4fm_call_capture(void);
 void c4fm_call_capture_ctl(uint8_t cmd);
 // The configuration in force (our callsign and DG-ID)
 const c4fm_config_t *c4fm_call_config(void);
-// The transmitter is in use by the engine (TX_VOICE or TX_ENDING)
+// Send a Wires-X command (C4FM_WX_*; room: the 5-digit room ID for CONNECT). The radio core keys the transmitter first;
+// the engine sends when idle or receiving and returns to receive when done (phase C4FM_PHASE_TX_DATA meanwhile).
+// False: not running, no callsign, or transmitting already
+bool c4fm_call_wx(uint8_t cmd, uint32_t room);
+const c4fm_wx_t *c4fm_call_wx_state(void);
+// Exposed for the tests: a command's data block (00, the command, its parameters, 03, the checksum); returns its
+// length. And the parse of a node's reply data
+uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MAX]);
+bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *wx);
+// The transmitter is in use by the engine (TX_VOICE, TX_ENDING or TX_DATA)
 bool c4fm_call_transmitting(void);
 
 // Exposed for the tests: the callsign as YSF sends it (10 characters, upper case, space padded)

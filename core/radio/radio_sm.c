@@ -1583,6 +1583,40 @@ static void c4fm_ptt_down(radio_sm_t *sm, uint32_t now_ms)
 	c4fm_call_poll(now_ms);
 }
 
+// A Wires-X command (RREQ_C4FM_WX): keyed as a short PTT, refused as PTT would be; the engine sends it and unkeys
+static void c4fm_wx_request(radio_sm_t *sm, uint8_t cmd, uint32_t room, uint32_t now_ms)
+{
+	if (sm->ptt || sm->view.state == RS_TX || !sm->c4fm_running || sm->view.ch.mode != RADIO_MODE_C4FM) {
+		return;
+	}
+	uint8_t reason = sm->view.c4fm.call[0] == '\0' ? TXDENY_NO_ID : tx_check(sm);
+	if (reason != TXDENY_NONE) {
+		deny(sm, reason);
+		sm->c4fm_wx_deny_ms = now_ms != 0 ? now_ms : 1;	// shown for a moment, then cleared (c4fm_follow)
+		return;
+	}
+	if (!c4fm_call_wx(cmd, room)) {
+		return;
+	}
+	if (!sm->c4fm_keyed) {
+		static const subtone_t none = { TONE_NONE, 0 };
+		if (!key_tx(sm->view.ch.tx_hz, RADIO_BW_12K5, sm->view.power, &none)) {
+			deny(sm, board_refusal());
+			sm->c4fm_wx_deny_ms = now_ms != 0 ? now_ms : 1;
+			return;
+		}
+		sm->c4fm_keyed = true;
+	}
+	sm->view.state = RS_TX;
+	sm->view.tx_auto = true;	// not the user's PTT: no talk timer on the screen's meaning
+	sm->view.last_tx_ms = now_ms != 0 ? now_ms : 1;
+	sm->view.tx_deny = TXDENY_NONE;
+	sm->view.tx_elapsed_ms = 0;
+	sm->tx_start_ms = now_ms;
+	changed(sm);
+	c4fm_call_poll(now_ms);
+}
+
 // Every tick while the engine runs: its view to ours, the radio state from its phase, the keying released once it is
 // off the air
 static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
@@ -1596,6 +1630,17 @@ static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
 		memcpy(v->src, cv->src, sizeof v->src);
 		memcpy(v->dst, cv->dst, sizeof v->dst);
 		memcpy(v->src_id, cv->src_id, sizeof v->src_id);
+		const c4fm_wx_t *w = c4fm_call_wx_state();
+		v->wx.serial = w->serial;
+		v->wx.reply_ms = w->reply_ms;
+		v->wx.sent_ms = w->sent_ms;
+		v->wx.sent = w->sent;
+		v->wx.connected = w->connected;
+		memcpy(v->wx.node_name, w->node_name, sizeof v->wx.node_name);
+		memcpy(v->wx.node_call, w->node_call, sizeof v->wx.node_call);
+		memcpy(v->wx.node_id, w->node_id, sizeof v->wx.node_id);
+		memcpy(v->wx.room_id, w->room_id, sizeof v->wx.room_id);
+		memcpy(v->wx.room_name, w->room_name, sizeof v->wx.room_name);
 		v->rx_dgid = cv->dgid;
 		v->rx_dt = cv->dt;
 		v->late_entry = cv->late_entry;
@@ -1618,6 +1663,11 @@ static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
 			deny(sm, TXDENY_REJECTED);
 		}
 	} else if (sm->view.state == RS_TX && !tx) {
+		sm->view.state = RS_IDLE;
+		sm->view.tx_deny = TXDENY_NONE;
+		changed(sm);
+	} else if (sm->view.state == RS_TX_DENIED && sm->c4fm_wx_deny_ms != 0 && now_ms - sm->c4fm_wx_deny_ms > 2000u) {
+		sm->c4fm_wx_deny_ms = 0;	// a refused Wires-X command: no PTT release clears it
 		sm->view.state = RS_IDLE;
 		sm->view.tx_deny = TXDENY_NONE;
 		changed(sm);
@@ -5839,6 +5889,11 @@ void radio_sm_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 	case RREQ_DMR_HEAR_ALL:
 		set_hear_all_latch(sm, req->arg != 0);
 		break;
+#if CONFIG_C4FM
+	case RREQ_C4FM_WX:
+		c4fm_wx_request(sm, (uint8_t)req->arg, req->arg2, now_ms);
+		break;
+#endif
 	case RREQ_DMR_FOCUS: {
 		uint32_t id = (uint32_t)req->arg & DMR_ID_MAX;
 		bool priv = (((uint32_t)req->arg >> 24) & 1u) != 0;

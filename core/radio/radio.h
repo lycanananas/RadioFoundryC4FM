@@ -185,7 +185,21 @@ typedef struct {
 #define RADIO_C4FM_CALL_LEN	10
 
 // radio_c4fm_view_t.phase (= c4fm_phase_t in c4fm/c4fm_call.h)
-enum { RC4FM_IDLE, RC4FM_RX_VOICE, RC4FM_RX_BUSY, RC4FM_TX_VOICE, RC4FM_TX_ENDING, RC4FM_TX_DENIED };
+enum { RC4FM_IDLE, RC4FM_RX_VOICE, RC4FM_RX_BUSY, RC4FM_TX_VOICE, RC4FM_TX_ENDING, RC4FM_TX_DENIED, RC4FM_TX_DATA };
+
+// Wires-X for the screens: the node's last reply (c4fm_call.h c4fm_wx_t)
+typedef struct {
+	uint32_t serial;	// bumped at every reply
+	uint32_t reply_ms;	// 0 = none yet
+	uint32_t sent_ms;	// the last command sent, 0 = none
+	uint8_t sent;		// C4FM_WX_* of it
+	bool connected;
+	char node_name[15];
+	char node_call[11];
+	char node_id[6];
+	char room_id[6];
+	char room_name[17];
+} radio_wx_view_t;
 
 // C4FM for the screens (docs/spec/c4fm.md): our callsign and DG-ID, the transmission heard
 typedef struct {
@@ -202,6 +216,7 @@ typedef struct {
 	uint8_t rx_dt;		// YSF data type: 0 V/D 1, 1 data, 2 DN (V/D 2), 3 VW (voice full rate)
 	bool late_entry;
 	uint32_t last_ms;	// hal_millis() at its end, 0 = none yet
+	radio_wx_view_t wx;
 } radio_c4fm_view_t;
 #endif
 
@@ -424,6 +439,11 @@ void radio_req_mode(uint8_t mode);		// radio_mode_t: FM, DMR or C4FM on the curr
 // The VFO's SFR role (CONFIG_SFR, docs/spec/sfr.md 4): a as a codeplug channel's SFR byte A, role bits 0 = none; the
 // outbound color code is the VFO's own. Saved with the VFO; refused outside it, while transmitting and in hotspot mode
 void radio_req_vfo_sfr(uint8_t a);
+#if CONFIG_C4FM
+// Send a Wires-X command to the node on the C4FM channel (c4fm_call.h C4FM_WX_*; room: CONNECT's 5-digit room ID).
+// The radio keys like a short PTT, refused as PTT would be (band, RX only, no callsign)
+void radio_req_c4fm_wx(uint8_t cmd, uint32_t room);
+#endif
 // Hear all latched on (every talkgroup on our slot, as while MONITOR is held) until off or the channel changes
 void radio_req_dmr_hear_all(bool on);
 // The talk target focused in a list (the UI calls it on every focus change; id 0 = none). A PTT press while one is
