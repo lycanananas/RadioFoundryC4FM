@@ -315,6 +315,9 @@ int32_t ui_svc_setting_get(uint8_t id)
 		return (st.c4fm_flags & SETTINGS_C4FM_PLAIN) == 0;
 	case UI_SET_C4FM_TEST_TONE:
 		return ambeVoiceTestSignal();
+	case UI_SET_C4FM_RXFE:
+		settings_read(&st);
+		return (st.c4fm_flags & SETTINGS_C4FM_RXFE_MASK) >> SETTINGS_C4FM_RXFE_SHIFT;
 	case UI_SET_WX_ROOM:
 		settings_read(&st);
 		return st.wx_room <= 99999u ? (int32_t)st.wx_room : 0;
@@ -524,8 +527,12 @@ bool ui_svc_setting_set(uint8_t id, int32_t value)
 	case UI_SET_VOICE_RX_GAIN:
 	case UI_SET_C4FM_FT70D:
 	case UI_SET_C4FM_DECODER:
+	case UI_SET_C4FM_RXFE:
 		st = settings_begin();
-		if (id == UI_SET_C4FM_DECODER) {
+		if (id == UI_SET_C4FM_RXFE) {
+			st->c4fm_flags = (uint8_t)((st->c4fm_flags & ~SETTINGS_C4FM_RXFE_MASK) |
+						   ((clamp16(value, 0, 3) << SETTINGS_C4FM_RXFE_SHIFT) & SETTINGS_C4FM_RXFE_MASK));
+		} else if (id == UI_SET_C4FM_DECODER) {
 			st->c4fm_flags = (uint8_t)((st->c4fm_flags & ~SETTINGS_C4FM_DECODER_MASK) |
 						   ((clamp16(value, 0, 3) << SETTINGS_C4FM_DECODER_SHIFT) & SETTINGS_C4FM_DECODER_MASK));
 		} else if (id == UI_SET_C4FM_TX_LEVEL) {

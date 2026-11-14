@@ -1202,6 +1202,23 @@ void radio_req_zone(uint16_t index) { retune(); view.zone_index = index; view.zo
 static void sim_vfo(bool on);
 void radio_req_vfo(bool on) { retune(); sim_vfo(on); }
 #if CONFIG_C4FM
+// A search in the simulator: one match, "POLSKA" 00001, whatever was typed
+void radio_req_c4fm_wx_search(const char *text)
+{
+	(void)text;
+	radio_wx_view_t *w = &view.c4fm.wx;
+	w->search = true;
+	w->rooms = 1;
+	w->rooms_total = 1;
+	w->rooms_start = 1;
+	strcpy(w->room[0].id, "00001");
+	strcpy(w->room[0].name, "POLSKA");
+	w->room[0].users = 2;
+	w->rooms_serial++;
+	serial++;
+}
+#endif
+#if CONFIG_C4FM
 // Wires-X in the simulator: the node answers at once (a node "SIM NODE"; CONNECT joins the room, DISCONNECT leaves)
 void radio_req_c4fm_wx(uint8_t cmd, uint32_t room)
 {
@@ -1220,6 +1237,7 @@ void radio_req_c4fm_wx(uint8_t cmd, uint32_t room)
 		w->connected = false;
 		w->room_id[0] = w->room_name[0] = '\0';
 	}	else if (cmd == 3) {	// C4FM_WX_ALL: a page of three rooms
+		w->search = false;
 		static const char *const ids[3] = { "00001", "28617", "40123" }, *const names[3] = { "POLSKA", "EUROPE LINK", "TEST ROOM" };
 		w->rooms = 3;
 		w->rooms_total = 3;

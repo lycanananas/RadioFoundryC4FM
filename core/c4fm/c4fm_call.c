@@ -42,6 +42,7 @@ static uint8_t wx_rx_bn, wx_rx_blk;	// the last BN heard and the block count it 
 static bool wx_pending;			// a command asked for, sent once idle
 static uint8_t wx_cmd;
 static uint32_t wx_room;
+static char wx_text[C4FM_WX_TEXT_LEN + 1];
 static uint8_t wx_tx[C4FM_WX_DATA_MAX];
 static uint16_t wx_tx_len;
 static uint8_t wx_tx_fn, wx_tx_ft;	// next FN to send, the last
@@ -212,14 +213,14 @@ static uint8_t wxSum(const uint8_t *d, uint16_t n)
 // 0x03 and the byte sum of everything before it. As a node parses it (MMDVM_CM WiresX.cpp: the command at [1..3],
 // the parameters from [5]: CONNECT the room ID in 6 characters, ALL "01" and the first entry "001"). Bytes [0] and
 // [4] are not checked by a node; they follow its replies' layout (to compare with a Yaesu radio's capture)
-uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MAX])
+uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, const char *text, uint8_t out[C4FM_WX_DATA_MAX])
 {
-	if (cmd > C4FM_WX_ALL) {
+	if (cmd > C4FM_WX_SEARCH) {
 		return 0;
 	}
 	uint16_t n = 0;
 	out[n++] = 0x00;
-	memcpy(out + n, wx_codes[cmd], 3);
+	memcpy(out + n, wx_codes[cmd == C4FM_WX_SEARCH ? C4FM_WX_ALL : cmd], 3);	// a search is ALL with "11"
 	n += 3;
 	out[n++] = 0x26;
 	if (cmd == C4FM_WX_CONNECT) {
@@ -237,6 +238,18 @@ uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MA
 		out[n++] = (uint8_t)('0' + start / 100u);
 		out[n++] = (uint8_t)('0' + start / 10u % 10u);
 		out[n++] = (uint8_t)('0' + start % 10u);
+	} else if (cmd == C4FM_WX_SEARCH) {
+		// "11", the first entry (3 digits), the text in 16 characters, space padded, upper case (MMDVM_CM
+		// processAll: the search text at the parameters' [5..20])
+		memcpy(out + n, "11001", 5);
+		n += 5;
+		for (unsigned i = 0; i < C4FM_WX_TEXT_LEN; i++) {
+			char c = text != NULL && text[0] != '\0' ? text[0] : ' ';
+			if (text != NULL && *text != '\0') {
+				text++;
+			}
+			out[n++] = (uint8_t)(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
+		}
 	}
 	out[n++] = 0x03;
 	out[n] = wxSum(out, n);
@@ -277,8 +290,12 @@ bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *w)
 	if (all && end >= 29) {
 		// The room list (MMDVM_CM sendAllReply): [7..11] the node's ID, [12..21] its callsign, [22..24] rooms on this
 		// page, [25..27] rooms in all, [28] CR; then 50 bytes a room: '5', [1..5] its ID, [6..21] its name,
-		// [22..24] its users, [35..48] a description, [49] CR
-		unsigned n = (unsigned)(data[22] - '0') * 100u + (unsigned)(data[23] - '0') * 10u + (unsigned)(data[24] - '0');
+		// [22..24] its users, [35..48] a description, [49] CR. A search's result ([5] '0'): [22] '1' and the count in
+		// [23..24] ("01" at [5..6] and no rooms: nothing found)
+		bool search = data[5] == '0';
+		unsigned n = search ? (unsigned)(data[23] - '0') * 10u + (unsigned)(data[24] - '0')
+				    : (unsigned)(data[22] - '0') * 100u + (unsigned)(data[23] - '0') * 10u + (unsigned)(data[24] - '0');
+		w->search = search;
 		unsigned total = (unsigned)(data[25] - '0') * 100u + (unsigned)(data[26] - '0') * 10u + (unsigned)(data[27] - '0');
 		if (n > C4FM_WX_ROOMS) {
 			n = C4FM_WX_ROOMS;
@@ -714,7 +731,7 @@ static void wxTxBegin(void)
 {
 	wx_pending = false;
 	callEnd();
-	wx_tx_len = c4fm_wx_command(wx_cmd, wx_room, wx_tx);
+	wx_tx_len = c4fm_wx_command(wx_cmd, wx_room, wx_text, wx_tx);
 	if (modem == NULL || cfg.callsign[0] == '\0' || wx_tx_len == 0 || !modem->tx_start()) {
 		view.phase = C4FM_PHASE_TX_DENIED;
 		changed();
@@ -737,8 +754,8 @@ static void wxTxBegin(void)
 	tx_term = false;
 	wx.sent = wx_cmd;
 	wx.sent_ms = now != 0 ? now : 1;
-	if (wx_cmd == C4FM_WX_ALL) {
-		wx.rooms_start = (uint16_t)(wx_room == 0 ? 1u : wx_room);
+	if (wx_cmd == C4FM_WX_ALL || wx_cmd == C4FM_WX_SEARCH) {
+		wx.rooms_start = (uint16_t)(wx_room == 0 || wx_cmd == C4FM_WX_SEARCH ? 1u : wx_room);
 	}
 	view.phase = C4FM_PHASE_TX_DATA;
 	changed();
@@ -937,13 +954,22 @@ bool c4fm_call_transmitting(void)
 
 bool c4fm_call_wx(uint8_t cmd, uint32_t room)
 {
-	if (!running || cfg.callsign[0] == '\0' || cmd > C4FM_WX_ALL || c4fm_call_transmitting()) {
+	if (!running || cfg.callsign[0] == '\0' || cmd > C4FM_WX_SEARCH || c4fm_call_transmitting()) {
 		return false;
 	}
 	wx_cmd = cmd;
 	wx_room = room;
 	wx_pending = true;
 	return true;
+}
+
+void c4fm_call_wx_text(const char *text)
+{
+	unsigned i = 0;
+	for (; text != NULL && text[i] != '\0' && i < C4FM_WX_TEXT_LEN; i++) {
+		wx_text[i] = text[i];
+	}
+	wx_text[i] = '\0';
 }
 
 const c4fm_wx_t *c4fm_call_wx_state(void)

@@ -1643,6 +1643,7 @@ static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
 		memcpy(v->wx.room_name, w->room_name, sizeof v->wx.room_name);
 		if (v->wx.rooms_serial != w->rooms_serial) {
 			v->wx.rooms_serial = w->rooms_serial;
+			v->wx.search = w->search;
 			v->wx.rooms = w->rooms;
 			v->wx.rooms_total = w->rooms_total;
 			v->wx.rooms_start = w->rooms_start;
@@ -4699,6 +4700,17 @@ static void apply_prefs(radio_sm_t *sm, const settings_t *st)
 		board.c4fm->set_tx_level(lvl == 0 ? 100u : lvl < 70u ? 70u : lvl > 130u ? 130u : lvl);	// next key-up
 	}
 	ambeVoiceSetRxGain(st->voice_rx_gain);
+	if (board.c4fm != NULL && board.c4fm->set_rx_profile != NULL) {
+		uint8_t fe = (uint8_t)((st->c4fm_flags & SETTINGS_C4FM_RXFE_MASK) >> SETTINGS_C4FM_RXFE_SHIFT);
+		if (fe != sm->c4fm_rx_profile) {
+			sm->c4fm_rx_profile = fe;
+			board.c4fm->set_rx_profile(fe);
+			if (sm->c4fm_running) {
+				sm->retune_due = true;	// radio_sm_poll retunes: the board sets the new profile up
+				sm->retune_due_ms = 0;
+			}
+		}
+	}
 	if (sm->c4fm_running) {
 		c4fm_configure(sm);
 		changed(sm);

@@ -66,6 +66,15 @@ static const pa_keyup_cfg_t keyup_cfg = {
 // band-pass, which takes the 4FSK's energy under 300 Hz). Bench: CHIP_REG chip 1, 0x500, to try others
 #define C4FM_RX_FM_BANDWIDTH	0x0Fu
 
+// C4FM receive front end profiles (bench, Menu > C4FM > Advanced > RX front end): 0 the FD6818 as for DMR (its flat
+// discriminator, the DMR filter), 1 the same with the 25 kHz FM filter, 2 the FD6818 as for FM receive (its own FM
+// demodulator, as APRS receives) with the 25 kHz filter, 3 the same with 12.5 kHz. Transmitting always sets it up as
+// for DMR (tx). Which one gives the cleanest symbols at a repeater's level is the open question (c4fm.md 9)
+#if CONFIG_C4FM
+static uint8_t c4fm_rx_profile;
+#endif
+
+
 static fd6818_t fd;
 static rfbus_3w_t fd_bus;
 static hrc7000_t modem;
@@ -150,6 +159,17 @@ static uint16_t fm_bw_reg(radio_bw_t bw)
 {
 	return bw == RADIO_BW_25K ? FD6818_BW_FM_25K : FD6818_BW_FM_12K5;
 }
+
+#if CONFIG_C4FM
+void hrc_board_c4fm_rx_profile(uint8_t profile)
+{
+	if (profile > 3 || profile == c4fm_rx_profile) {
+		return;
+	}
+	c4fm_rx_profile = profile;
+	have_rx = false;	// the next rx() sets it up
+}
+#endif
 
 static hrc7000_tone_t c7_tone(uint8_t type)
 {
@@ -405,8 +425,10 @@ static bool rx_tune(uint32_t hz, radio_bw_t bw, const subtone_t *tone, bool am, 
 	} else if (mode == RADIO_MODE_C4FM) {
 		// The FD6818 as for DMR (flat discriminator); the HR_C7000 in FM, copying its AF input to the CPU at 8 kHz
 		// (modem-hrc7000.md 8.5) without the voice band-pass and without playing it: the speaker gets decoded voice
+		fd6818_set_mode(&fd, c4fm_rx_profile >= 2 ? FD6818_MODE_FM : FD6818_MODE_DMR);
 		fd6818_set_freq(&fd, synth_hz(hz));
-		fd6818_set_bandwidth(&fd, FD6818_BW_DMR);
+		fd6818_set_bandwidth(&fd, c4fm_rx_profile == 0 ? FD6818_BW_DMR : fm_bw_reg(c4fm_rx_profile == 3 ? RADIO_BW_12K5
+												  : RADIO_BW_25K));
 		fd6818_set_state(&fd, FD6818_STATE_RX);
 		hrc7000_fm_rx(&modem, true);
 		hrc7000_wr(&modem, C7_FM_BANDWIDTH, C4FM_RX_FM_BANDWIDTH);
@@ -499,6 +521,12 @@ static bool tx(uint32_t hz, radio_bw_t bw, uint8_t power, const subtone_t *tone)
 	fd6818_set_freq(&fd, synth_hz(digital && have_rx ? rx_hz : hz));
 	hrc_dac_b_power(true);
 	if (digital) {
+#if CONFIG_C4FM
+		if (mode == RADIO_MODE_C4FM && c4fm_rx_profile >= 2) {
+			fd6818_set_mode(&fd, FD6818_MODE_DMR);	// a C4FM receive profile in FM mode: back to DMR's for TX
+			have_rx = false;			// and the next rx() sets the profile up again
+		}
+#endif
 		// 8.5 "Enter DMR TX": the PA select and drive wait for each burst's sequence. Between bursts the radio
 		// receives: the FD6818 in RX and the LNA on until the RF task switches to the first burst (burst_on). In TX
 		// here, the hotspot, which keys to listen, heard nothing until its first burst

@@ -49,6 +49,9 @@ typedef struct {
 
 	// Optional, bench: the transmit deviation in percent of the board's C4FM default (100); NULL when fixed
 	void (*set_tx_level)(uint8_t percent);
+	// Optional, bench: the receive front end's set-up, the board's own profiles (0 = its default), from the next
+	// receive tuning; NULL when it has one
+	void (*set_rx_profile)(uint8_t profile);
 	// Optional, diagnostics: the driver's counters; NULL = none
 	void (*stats)(hal_c4fm_stats_t *out);
 } hal_c4fm_t;

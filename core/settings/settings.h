@@ -257,7 +257,9 @@ typedef struct {
 // c4fm_flags
 #define SETTINGS_C4FM_PLAIN		0x01u	// plain fields (destination ALL, CM 0) instead of an FT-70D's
 #define SETTINGS_C4FM_DECODER_SHIFT	1	// bits 1-2: the decoder (c4fm_call.h C4FM_DECODER_*), 0 = soft decisions
-#define SETTINGS_C4FM_DECODER_MASK	0x06u	// receive past the band table is on (not about the codeplug: the free bit here)
+#define SETTINGS_C4FM_DECODER_MASK	0x06u
+#define SETTINGS_C4FM_RXFE_SHIFT	3	// bits 3-4: the receive front end profile (hal_c4fm_t.set_rx_profile), 0 = the board's default
+#define SETTINGS_C4FM_RXFE_MASK		0x18u	// receive past the band table is on (not about the codeplug: the free bit here)
 
 #define SETTINGS_ZONE_JRN_NONE		0u	// zone_jrn_kind
 #define SETTINGS_ZONE_JRN_ADD		1u

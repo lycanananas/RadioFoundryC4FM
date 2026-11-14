@@ -54,6 +54,8 @@ extern const hal_dmr_modem_t hrc_dmr;
 // calibration, two-point modulation), leave before it sets up FM. The board's rx() for C4FM sets the chip's FM
 // receive (hrc7000_fm_rx, band-pass off) so the AF copy runs
 void hrc_c4fm_enter(void);
+// The board's C4FM receive front end profiles (hal_c4fm_t.set_rx_profile); weak, nothing without a board's
+void hrc_board_c4fm_rx_profile(uint8_t profile);
 void hrc_c4fm_leave(void);
 extern const hal_c4fm_t hrc_c4fm;
 // Bench: the transmit modulation level in percent of DMR's (139 default), set (1-255) from the next key-up; set <= 0

@@ -130,6 +130,7 @@ of a frame are coded as CSD1 / CSD2 (`ysfCsdEncode`).
 |---|---|
 | Command (ours) | `00`, the command (DX `5D 71 5F` status, CONNECT `5D 23 5F`, DISCONNECT `5D 2A 5F`, ALL `5D 66 5F`), `26`, the parameters in ASCII (CONNECT: the room ID in 5 digits and a space), `03`, the byte sum of all before it |
 | Reply (the node's) | `[1..4]` the reply code (`5D 51 5F 26` DX, `5D 41 5F 26` connect / disconnect), `[5..9]` the node's ID, `[10..19]` its callsign, `[20..33]` its name, `[34..35]` `15` in a room / `12` not, `[36..40]` the room's ID, `[41..56]` its name; `03` and the byte sum |
+| Search | ALL's command with the parameters `11`, the first entry and the text (16 characters, upper case); the reply is the list's, with `02` at `[5..6]`, `1` at `[22]` and the count in `[23..24]` (`01` and none: nothing found) |
 | Room list (ALL) | the command's parameters `01` and the first entry in 3 digits; the reply `5D 46 5F 26`, `[22..24]` rooms on the page, `[25..27]` rooms in all, then 50 bytes a room (`[1..5]` ID, `[6..21]` name, `[22..24]` users). About 1030 bytes: several blocks, each next block's FN 1 starting with a `00` before its 19 bytes; BN has 2 bits, so the receiver counts blocks as BN moves on (a fifth block wraps to 0) |
 
 The layout follows a node's implementation (MMDVM_CM `WiresX.cpp`): a node checks the command at `[1..3]` and the
@@ -140,7 +141,7 @@ connect and the reply work.
 | UI | |
 |---|---|
 | # on Home on a C4FM channel or VFO | asks the node for its status (DX) and opens Menu > C4FM > Wires-X |
-| Wires-X page | Node (its name; OK asks again), Room (the room it is in, or none; "waiting..." / "no answer" after a command), Rooms (the node's list, 20 a page: OK on a room connects to it, the last row asks for the next page), Room ID (five digits, kept), Connect, Disconnect |
+| Wires-X page | Node (its name; OK asks again), Room (the room it is in, or none; "waiting..." / "no answer" after a command), Rooms (the node's list, 20 a page: OK on a room connects to it, the last row asks for the next page), Search (a name or its start; the matches as the list), Room ID (five digits, kept), Connect, Disconnect |
 | Keying | a command keys the radio as a short PTT and is refused as PTT would be (band, RX only, no callsign); the refusal clears by itself after 2 s |
 
 `c4fmCallTest` sends CONNECT through the modulator and checks the frames, then plays a node's replies into the
@@ -167,7 +168,7 @@ The menus in the C4FM build (`core/ui/ui_menus.c`, `ui_modes.c`):
 | Zones, Channels | as in RadioFoundry |
 | FM | default squelch, busy lockout, roger beep; the channel or VFO in use (FM only): 25 kHz, RX / TX tone (CTCSS / DCS), the VFO's repeater offset |
 | DMR | last caller, contacts, messages, recent, DMR ID and name, reply window, monitor, talker alias, talk permit tone, Data and messages (radio checks, call alerts, SMS format) |
-| C4FM | Wires-X (5.1), Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
+| C4FM | Wires-X (5.1), Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (RX front end, Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
 | Tools | as in RadioFoundry |
 | Settings | the shared groups: Sound, Display, Talk & listen (TX timeout, VFO step), Digital voice (mic gain, AGC, noise reduction, voice volume), Power saving, Keys, Key lock, Advanced |
 
@@ -227,8 +228,11 @@ CHIP_REG (`rfoundry_debug.py reg CHIP REG [VALUE] --page PAGE`), boards that bui
 
 1. The deviation the scaled RF_MOD_BIAS_CTRL gives: linear? Measured against a C4FM receiver's or a service monitor's.
 2. Measured: the FM receive copy is flat (no ISI on captures) and taken before the chip's FM filters (FM_BANDWIDTH
-   doesn't change it). Through a repeater the noise is the limit (raw BER 5-8 % where direct gives 0.3 %): the chip's
-   own DMR demodulator in the physical layer receive mode with the C4FM sync is the next step.
+   doesn't change it). Through a repeater at -83..-100 dBm the raw BER is 8-10 % (direct, strong: 0.3 %), where
+   Yaesu radios decode cleanly: the receive path loses SNR. Under test: the RF chip's set-up for C4FM (Menu > C4FM >
+   Advanced > RX front end, `hal_c4fm_t.set_rx_profile`; DMR's flat discriminator and filter, the 25 kHz filter, or
+   the RF chip's own FM demodulator), compared on traffic with `c4fm_capture.py monitor --rotate-fe 0,1,2,3`; then
+   the chip's own 4FSK demodulator.
 3. Whether mic PCM and the vocoder keep their timing in the physical layer mode (the split duplex TX half fed its
    voice from the host).
 4. C4FM receivers' lock on our header after 100 ms of preamble (Yaesu radios key with a longer one).

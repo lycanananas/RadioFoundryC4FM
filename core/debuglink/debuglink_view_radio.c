@@ -37,6 +37,7 @@
 #define DL_SETTING_ENC_OPTIONS	31u	// SETTING id of the vocoder's encode options (VOCODER_OPT_*)
 #define DL_SETTING_ZS_OFFERS	32u	// SETTING id of zone share offers (zone_share_api.h)
 #define DL_SETTING_REF_TRIM	35u
+#define DL_SETTING_C4FM_RXFE	41u	// the C4FM receive front end profile 0-3, RAM only (hal_c4fm_t.set_rx_profile)
 #define DL_SETTING_C4FM_CAPTURE	40u	// the C4FM bench capture: 0 run, 1 arm, 2 freeze now (c4fm_call_capture_ctl)	// SETTING id of the reference trim, ppb two's complement (radio/ref_trim.h)
 
 static const char *word(uint8_t v, const char *const *names, uint8_t n)
@@ -476,6 +477,14 @@ uint8_t debuglink_radio_feature_op(uint8_t op, const uint8_t *a, uint16_t len)
 			return DL_ST_OK;
 		}
 #if CONFIG_C4FM
+		if (a[0] == DL_SETTING_C4FM_RXFE) {
+			if (v > 3 || board.c4fm == NULL || board.c4fm->set_rx_profile == NULL) {
+				return DL_ST_BAD_ARG;
+			}
+			board.c4fm->set_rx_profile((uint8_t)v);	// the board notes it; the retune sets it up
+			radio_req_retune();
+			return DL_ST_OK;
+		}
 		if (a[0] == DL_SETTING_C4FM_CAPTURE) {
 			if (v > 2) {
 				return DL_ST_BAD_ARG;

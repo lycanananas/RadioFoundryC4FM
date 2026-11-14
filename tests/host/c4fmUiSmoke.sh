@@ -26,7 +26,9 @@ check "ok 5 down down down ok" c4fm-call
 check "ok 5 down down down down ok" group
 # Wires-X: # on Home on a C4FM VFO (Switch to VFO, Quick tile 4 = mode -> C4FM) opens its page; a room and Connect
 check "ok ok quick 4 back ctx" group
-check "ok ok quick 4 back ctx down down down ok 2 8 6 1 7 ok down ok" group
+check "ok ok quick 4 back ctx down down down down ok 2 8 6 1 7 ok down ok" group
+check "ok ok quick 4 back ctx down down down ok" wx-search
+check "ok ok quick 4 back ctx down down down ok 7 ok" wx-rooms
 check "ok ok quick 4 back ctx down down ok" wx-rooms
 check "ok ok quick 4 back ctx down down ok down ok" group
 check "ok 7" settings

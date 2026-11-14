@@ -9,6 +9,9 @@
 #include "radio/radio_sm.h"
 #include "hal_time.h"
 #include "config.h"
+#if CONFIG_C4FM
+#include "c4fm/c4fm_call.h"	// C4FM_WX_SEARCH, c4fm_call_wx_text
+#endif
 #if CONFIG_HOTSPOT
 #include "hotspot/hotspot.h"
 #include "radio/radio_hotspot.h"
@@ -363,6 +366,12 @@ static void post_pair(uint8_t type, int32_t arg, uint32_t arg2, TickType_t wait)
 
 #if CONFIG_C4FM
 void radio_req_c4fm_wx(uint8_t cmd, uint32_t room) { post_pair(RREQ_C4FM_WX, cmd, room, 0); }
+// The text goes to the engine before the request: the radio task reads it when it sends (one search at a time)
+void radio_req_c4fm_wx_search(const char *text)
+{
+	c4fm_call_wx_text(text);
+	post_pair(RREQ_C4FM_WX, C4FM_WX_SEARCH, 0, 0);
+}
 #endif
 
 void radio_req_scan(uint8_t cmd) { post(RREQ_SCAN, cmd, 0); }

@@ -121,7 +121,9 @@ Through a repeater and Wires-X: check that the network shows the DM-32's callsig
 
 `tools/c4fm_capture.py monitor --minutes 30` logs every transmission heard (callsign, radio ID, frames, bit error
 rates, RSSI) and saves the receiver's input audio around the start of each (`.raw`, int16 8 kHz, plus `.json`).
-`tests/host/c4fmReplay FILE.raw [--soft]` runs the radio's receiver on a capture on the host, so receiver changes can
+`--rotate-fe 0,1,2,3` switches the receive front end profile after each transmission (DMR, DMR wide, FM wide, FM
+narrow; Menu > C4FM > Advanced > RX front end) and logs which one each had: an A/B of the set-ups on the same
+repeater. `tests/host/c4fmReplay FILE.raw [--soft]` runs the radio's receiver on a capture on the host, so receiver changes can
 be measured on real signals before they are flashed. Nothing in this test transmits.
 
 ## 4. Results

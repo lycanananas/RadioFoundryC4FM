@@ -355,6 +355,17 @@ uint8_t hrc_c4fm_level(int16_t set)
 	return c4fm.level_pct != 0 ? c4fm.level_pct : HRC7000_C4FM_LEVEL_DEF;
 }
 
+// The receive front end (hal_c4fm_t.set_rx_profile): the RF chip is the board's, so the board takes it
+__attribute__((weak)) void hrc_board_c4fm_rx_profile(uint8_t profile)
+{
+	(void)profile;
+}
+
+static void c4fm_set_rx_profile(uint8_t profile)
+{
+	hrc_board_c4fm_rx_profile(profile);
+}
+
 static void c4fm_set_tx_level(uint8_t percent)
 {
 	c4fm.level_pct = (uint8_t)(((uint32_t)percent * HRC7000_C4FM_LEVEL_DEF + 50u) / 100u);
@@ -383,6 +394,7 @@ const hal_c4fm_t hrc_c4fm = {
 	.rx_start = c4fm_rx_start, .rx_read = hrc_fm_rx_read, .rx_stop = c4fm_rx_stop,
 	.tx_start = c4fm_tx_start, .tx_space = c4fm_tx_space, .tx_queued = c4fm_tx_queued, .tx_write = c4fm_tx_write,
 	.tx_stop = c4fm_tx_stop, .tx_on_air = c4fm_tx_on_air, .set_tx_level = c4fm_set_tx_level,
+	.set_rx_profile = c4fm_set_rx_profile,
 	.stats = c4fm_stats,
 };
 #endif

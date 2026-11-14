@@ -2142,6 +2142,11 @@ static const ui_scr_def_t text_screen = {
 #endif
 
 #if CONFIG_C4FM && CONFIG_CHANNEL_EDIT
+static const ui_scr_def_t wx_search_screen = {
+	.name = "wx-search", .flags = SF_LIST, .prefix = TRN("Search"), .title = text_title,
+	.hint = TRN(TEXT_ALT_OPEN "Back delete  # ABC/123/abc  OK find" TEXT_ALT_NEXT "Back del  # mode  OK" TEXT_ALT_CLOSE),
+	.count = text_count, .item = text_item, .key = text_key_fn, .enter = text_enter,
+};
 static const ui_scr_def_t c4fm_call_screen = {
 	.name = "c4fm-call", .flags = SF_LIST, .prefix = TRN("Callsign"), .title = text_title,
 	.hint = TRN(TEXT_ALT_OPEN "Back delete  # ABC/123/abc  OK keep" TEXT_ALT_NEXT "Back del  # mode  OK" TEXT_ALT_CLOSE),
@@ -5516,7 +5521,7 @@ enum { SA_DIAG, SA_FIRMWARE, SA_CODEPLUG, SA_RESET, SA_MY_RADIO, SA_CRASH, SA_LA
        // The mode menus (CONFIG_C4FM): screens opened from a mode's page, and its sub-pages
        SA_LAST_CALLER, SA_CONTACTS, SA_MESSAGES, SA_RECENT, SA_C4FM_HEARD, SA_C4FM_CALL, SA_C4FM_ADV, SA_DMR_DATA,
        // Wires-X (CONFIG_C4FM): the page, and its commands
-       SA_WIRESX, SA_WX_NODE, SA_WX_ROOM, SA_WX_CONNECT, SA_WX_DISCONNECT, SA_WX_ROOMS };
+       SA_WIRESX, SA_WX_NODE, SA_WX_ROOM, SA_WX_CONNECT, SA_WX_DISCONNECT, SA_WX_ROOMS, SA_WX_SEARCH };
 
 typedef struct {
 	const char *name;
@@ -5899,6 +5904,7 @@ static const set_item_t s_wx[] = {
 	ACTION(TRN("Node"), "Wires-X node status refresh", SA_WX_NODE),
 	ACTION(TRN("Room"), "Wires-X room connected", SA_WX_ROOM),
 	ACTION(TRN("Rooms"), "Wires-X room list active rooms", SA_WX_ROOMS),
+	ACTION(TRN("Search"), "Wires-X find room by name", SA_WX_SEARCH),
 	NUMBER(TRN("Room ID"), "Wires-X room number", UI_SET_WX_ROOM, 0, 9999, 1, NULL),	// to 99999: set_range
 	ACTION(TRN("Connect"), "Wires-X connect room", SA_WX_CONNECT),
 	ACTION(TRN("Disconnect"), "Wires-X disconnect leave room", SA_WX_DISCONNECT),
@@ -5908,7 +5914,11 @@ static const set_item_t s_wx[] = {
 // demodulator there is: the chip's own 4FSK demodulator is not used yet)
 static const int16_t v_decoder[] = { 0, 1 };	// C4FM_DECODER_*
 static const char *const n_decoder[] = { TRN("Soft"), TRN("Hard") };
+// RX front end: the board's receive set-ups for C4FM (bench: which gives the cleanest symbols on a weak signal)
+static const int16_t v_rxfe[] = { 0, 1, 2, 3 };
+static const char *const n_rxfe[] = { TRN("DMR"), TRN("DMR wide"), TRN("FM wide"), TRN("FM narrow") };
 static const set_item_t s_c4fm_adv[] = {
+	LIST(TRN("RX front end"), "C4FM receiver RF set-up bandwidth sensitivity debug", UI_SET_C4FM_RXFE, v_rxfe, n_rxfe),
 	LIST(TRN("Decoder"), "C4FM receiver demodulator soft hard decisions debug", UI_SET_C4FM_DECODER, v_decoder, n_decoder),
 	NUMBER(TRN("TX deviation"), "C4FM modulation level", UI_SET_C4FM_TX_LEVEL, 70, 130, 5, "%"),
 	NUMBER(TRN("Preamble"), "C4FM lead-in", UI_SET_C4FM_PREAMBLE, 100, 500, 100, " ms"),
@@ -6134,7 +6144,7 @@ static uint32_t wx_rooms_asked;	// rooms_serial when the list was asked for: unt
 
 static bool wx_rooms_more(const radio_wx_view_t *w)
 {
-	return w->rooms_serial != wx_rooms_asked && w->rooms_start + w->rooms <= w->rooms_total && w->rooms > 0;
+	return !w->search && w->rooms_serial != wx_rooms_asked && w->rooms_start + w->rooms <= w->rooms_total && w->rooms > 0;
 }
 
 static uint16_t wx_rooms_count(void)
@@ -6189,7 +6199,7 @@ static const char *wx_rooms_empty(void)
 	const radio_wx_view_t *w = &ui_view()->c4fm.wx;
 	if (w->rooms_serial == wx_rooms_asked)
 		return w->sent_ms != 0 && hal_millis() - w->sent_ms > 10000u ? TR("No answer from the node") : TR("Asking the node...");
-	return TR("No rooms");
+	return ui_view()->c4fm.wx.search ? TR("No room by that name") : TR("No rooms");
 }
 
 // The status line of the Wires-X page: what the node said last, or that it hasn't answered
@@ -6440,6 +6450,18 @@ static void c4fm_call_kept(void)
 	ui_svc_c4fm_call_set(c4fm_call_buf);
 }
 
+// Menu > C4FM > Wires-X > Search: a room's name (or its start); the node's matches come as the room list
+static char wx_search_buf[C4FM_WX_TEXT_LEN + 1];
+
+static void wx_search_kept(void)
+{
+	if (wx_search_buf[0] == '\0')
+		return;
+	wx_rooms_asked = ui_view()->c4fm.wx.rooms_serial;
+	radio_req_c4fm_wx_search(wx_search_buf);
+	ui_push(SCR_WX_ROOMS, 0);
+}
+
 static void c4fm_call_edit(void)
 {
 #if CONFIG_CHANNEL_EDIT
@@ -6541,6 +6563,12 @@ static void group_select(uint16_t i, bool hold)
 			break;
 		}
 		case SA_WX_DISCONNECT: radio_req_c4fm_wx(C4FM_WX_DISCONNECT, 0); break;
+		case SA_WX_SEARCH:
+#if CONFIG_CHANNEL_EDIT
+			text_open(wx_search_buf, C4FM_WX_TEXT_LEN, SCR_WX_SEARCH);
+			text_done = wx_search_kept;
+#endif
+			break;
 		case SA_WX_ROOMS:
 			wx_rooms_asked = ui_view()->c4fm.wx.rooms_serial;
 			radio_req_c4fm_wx(C4FM_WX_ALL, 1);
@@ -7134,6 +7162,7 @@ const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 #endif
 #if CONFIG_C4FM && CONFIG_CHANNEL_EDIT
 	[SCR_C4FM_CALL] = &c4fm_call_screen,
+	[SCR_WX_SEARCH] = &wx_search_screen,
 #endif
 	[SCR_CP_FOREIGN] = &cpf_screen,
 #if DATA_IDS

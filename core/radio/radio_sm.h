@@ -373,6 +373,7 @@ typedef struct {
 	uint16_t c4fm_preamble_ms;	// the settings' preamble
 	bool c4fm_plain;		// the settings' plain fields (not an FT-70D's)
 	uint8_t c4fm_decoder;		// the settings' decoder (C4FM_DECODER_*)
+	uint8_t c4fm_rx_profile;	// the receive front end profile in force (hal_c4fm_t.set_rx_profile)
 	uint32_t c4fm_wx_deny_ms;	// a Wires-X command refused at this time (no PTT to clear it): 0 = none
 	char c4fm_call[11];		// the settings' callsign, "" = the radio name's first word
 #endif

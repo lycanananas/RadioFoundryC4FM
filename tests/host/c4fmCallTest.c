@@ -338,14 +338,14 @@ int main(void)
 	// MMDVM_CM's sendConnectReply) played into B gives the room
 	{
 		uint8_t cmd[C4FM_WX_DATA_MAX];
-		uint16_t cl = c4fm_wx_command(C4FM_WX_CONNECT, 12345, cmd);
+		uint16_t cl = c4fm_wx_command(C4FM_WX_CONNECT, 12345, NULL, cmd);
 		uint8_t sum = 0;
 		for (int i = 0; i < 12; i++) {
 			sum = (uint8_t)(sum + cmd[i]);
 		}
 		CHECK(cl == 13 && cmd[0] == 0x00 && cmd[1] == 0x5D && cmd[2] == 0x23 && cmd[3] == 0x5F &&
 		      memcmp(cmd + 5, "12345 ", 6) == 0 && cmd[11] == 0x03 && cmd[12] == sum, "CONNECT command bytes");
-		CHECK(c4fm_wx_command(C4FM_WX_DX, 0, cmd) == 7 && cmd[2] == 0x71 && cmd[5] == 0x03, "DX command bytes");
+		CHECK(c4fm_wx_command(C4FM_WX_DX, 0, NULL, cmd) == 7 && cmd[2] == 0x71 && cmd[5] == 0x03, "DX command bytes");
 
 		c4fm_call_stop();
 		c4fm_call_init(&modemA);
@@ -572,8 +572,44 @@ int main(void)
 			      wl->room[1].users == 7 && strcmp(wl->room[2].name, "TEST ROOM") == 0,
 			      "the room list over %u blocks parsed", bn + 1);
 		}
-		CHECK(c4fm_wx_command(C4FM_WX_ALL, 21, cmd) == 12 && memcmp(cmd + 5, "01021", 5) == 0,
+		CHECK(c4fm_wx_command(C4FM_WX_ALL, 21, NULL, cmd) == 12 && memcmp(cmd + 5, "01021", 5) == 0,
 		      "ALL command: the page from entry 21");
+		// SEARCH: ALL's code with "11", the first entry and the text, upper case, space padded to 16
+		CHECK(c4fm_wx_command(C4FM_WX_SEARCH, 0, "pol", cmd) == 28 && cmd[2] == 0x66 &&
+		      memcmp(cmd + 5, "11001POL             ", 21) == 0 && cmd[26] == 0x03, "SEARCH command bytes");
+		// A search's result (MMDVM_CM sendSearchReply: "02", '1' and a 2-digit count) and nothing found ("01")
+		{
+			uint8_t sr[200];
+			memset(sr, ' ', sizeof sr);
+			sr[0] = 0;
+			memcpy(sr + 1, "\x5D\x46\x5F\x26", 4);
+			memcpy(sr + 5, "02", 2);
+			memcpy(sr + 7, "54321SR5WI     ", 15);
+			memcpy(sr + 22, "101001", 6);
+			sr[28] = 0x0D;
+			memcpy(sr + 29, "100001POLSKA          000", 25);
+			sr[29 + 49] = 0x0D;
+			sr[79] = 0x03;
+			uint8_t ss = 0;
+			for (int i = 0; i < 80; i++) {
+				ss = (uint8_t)(ss + sr[i]);
+			}
+			sr[80] = ss;
+			c4fm_wx_t r;
+			memset(&r, 0, sizeof r);
+			CHECK(c4fm_wx_parse(sr, 81, &r) && r.search && r.rooms == 1 && strcmp(r.room[0].id, "00001") == 0 &&
+			      strcmp(r.room[0].name, "POLSKA") == 0, "search result parsed (%u rooms)", r.rooms);
+			memcpy(sr + 5, "01", 2);
+			memcpy(sr + 22, "100000", 6);
+			sr[28] = 0x0D;
+			sr[29] = 0x03;
+			ss = 0;
+			for (int i = 0; i < 30; i++) {
+				ss = (uint8_t)(ss + sr[i]);
+			}
+			sr[30] = ss;
+			CHECK(c4fm_wx_parse(sr, 31, &r) && r.search && r.rooms == 0, "search: nothing found");
+		}
 		wx = c4fm_call_wx_state();
 		// A reply with a wrong checksum is not taken
 		c4fm_wx_t junk = *wx;

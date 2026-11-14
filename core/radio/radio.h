@@ -207,6 +207,7 @@ typedef struct {
 	char room_name[17];
 	// The room list's last page (ALL)
 	uint32_t rooms_serial;	// bumped at every list
+	bool search;		// the list is a search's result
 	uint8_t rooms;
 	uint16_t rooms_total, rooms_start;	// rooms the node knows; this page's first entry (1-based)
 	radio_wx_room_t room[RADIO_WX_ROOMS];
@@ -454,6 +455,8 @@ void radio_req_vfo_sfr(uint8_t a);
 // Send a Wires-X command to the node on the C4FM channel (c4fm_call.h C4FM_WX_*; room: CONNECT's 5-digit room ID).
 // The radio keys like a short PTT, refused as PTT would be (band, RX only, no callsign)
 void radio_req_c4fm_wx(uint8_t cmd, uint32_t room);
+// A Wires-X room search by name (up to 16 characters): the result comes as the room list
+void radio_req_c4fm_wx_search(const char *text);
 #endif
 // Hear all latched on (every talkgroup on our slot, as while MONITOR is held) until off or the channel changes
 void radio_req_dmr_hear_all(bool on);

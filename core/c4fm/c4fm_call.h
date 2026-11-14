@@ -55,7 +55,9 @@ enum {
 	C4FM_WX_CONNECT,	// connect the node to a room (5-digit ID)
 	C4FM_WX_DISCONNECT,	// leave the room
 	C4FM_WX_ALL,		// the list of active rooms (a page of up to 20 from a 1-based entry)
+	C4FM_WX_SEARCH,		// the rooms whose names match a text (c4fm_call_wx_text), the same list
 };
+#define C4FM_WX_TEXT_LEN	16	// a search text
 #define C4FM_WX_DATA_MAX	320	// a command, and the raw bytes kept for the bench (the first 320 of a reply)
 #define C4FM_WX_RX_MAX		1300	// a reply being received: several blocks (the room list is about 1030 bytes)
 #define C4FM_WX_ROOMS		20	// rooms of one page of the list
@@ -77,6 +79,7 @@ typedef struct {
 	char node_name[15];		// its name
 	char room_id[6];		// the room's ID, "" when not connected
 	char room_name[17];
+	bool search;			// the list is a search's result (else the room list)
 	uint8_t rooms;			// ALL: rooms on this page
 	uint16_t rooms_total;		// ALL: rooms the node knows
 	uint16_t rooms_start;		// ALL: the page's first entry (1-based)
@@ -185,10 +188,12 @@ const c4fm_config_t *c4fm_call_config(void);
 // the engine sends when idle or receiving and returns to receive when done (phase C4FM_PHASE_TX_DATA meanwhile).
 // False: not running, no callsign, or transmitting already
 bool c4fm_call_wx(uint8_t cmd, uint32_t room);
+// The text the next SEARCH sends (upper case, up to C4FM_WX_TEXT_LEN characters)
+void c4fm_call_wx_text(const char *text);
 const c4fm_wx_t *c4fm_call_wx_state(void);
 // Exposed for the tests: a command's data block (00, the command, its parameters, 03, the checksum); returns its
 // length. And the parse of a node's reply data
-uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, uint8_t out[C4FM_WX_DATA_MAX]);
+uint16_t c4fm_wx_command(uint8_t cmd, uint32_t room, const char *text, uint8_t out[C4FM_WX_DATA_MAX]);
 bool c4fm_wx_parse(const uint8_t *data, uint16_t len, c4fm_wx_t *wx);
 // The transmitter is in use by the engine (TX_VOICE, TX_ENDING or TX_DATA)
 bool c4fm_call_transmitting(void);
