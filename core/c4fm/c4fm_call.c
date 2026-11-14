@@ -378,7 +378,8 @@ static void wxReceive(const uint8_t *frame, const c4fm_frame_info_t *info, const
 	uint16_t len = wx_rx_len;
 	wx.data_len = len < C4FM_WX_DATA_MAX ? len : C4FM_WX_DATA_MAX;
 	memcpy(wx.data, wx_rx, wx.data_len);
-	c4fm_wx_t parsed = wx;
+	static c4fm_wx_t parsed;	// static: about 900 bytes, more than the radio task's stack spares
+	parsed = wx;
 	if (c4fm_wx_parse(wx_rx, len, &parsed)) {
 		parsed.serial = wx.serial + 1;
 		parsed.reply_ms = now != 0 ? now : 1;

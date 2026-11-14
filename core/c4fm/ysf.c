@@ -113,10 +113,12 @@ unsigned ysfConvDecode(const uint8_t *in, unsigned nsym, uint8_t *out, unsigned 
 
 // Soft decision Viterbi: in[2 nsym] (> 0 a 1, magnitude the confidence), the same trellis; the branch cost of an
 // expected bit is how far the soft value is from it (0..254)
+// The soft decoders' buffers are static (off the caller's stack: the radio task's is small); they are not reentrant,
+// and run in one task only
 static unsigned convDecodeSoft(const int8_t *in, unsigned nsym, uint8_t *out, unsigned nout)
 {
 	uint32_t metric[16], next[16];
-	uint16_t dec[CONV_MAX_SYM];
+	static uint16_t dec[CONV_MAX_SYM];
 	if (nsym > CONV_MAX_SYM) {
 		nsym = CONV_MAX_SYM;
 	}
@@ -154,7 +156,7 @@ static unsigned convDecodeSoft(const int8_t *in, unsigned nsym, uint8_t *out, un
 		s = (uint8_t)((s >> 1) | (((dec[t] >> s) & 1u) << 3));
 	}
 	// The hard errors corrected (comparable with ysfConvDecode's cost): the re-encoded path against the signs
-	uint8_t re[CONV_MAX_SYM / 4 + 1];
+	static uint8_t re[CONV_MAX_SYM / 4 + 1];
 	ysfConvEncode(out, re, nsym < nout ? nsym : nout);
 	unsigned errs = 0;
 	for (unsigned t = 0; t < (nsym < nout ? nsym : nout); t++) {
@@ -297,7 +299,7 @@ bool ysfFichDecode(const uint8_t *frame, ysf_fich_t *f, ysf_fec_info_t *info)
 
 bool ysfFichDecodeSoft(const int8_t *soft, ysf_fich_t *f, ysf_fec_info_t *info)
 {
-	int8_t conv[200];
+	static int8_t conv[200];
 	uint8_t words[13] = { 0 };
 	softDeinterleave(soft + 8 * YSF_SYNC_BYTES, conv, 5);
 	unsigned errs = convDecodeSoft(conv, 100, words, 96);
@@ -369,7 +371,7 @@ static bool chanDecode(const uint8_t *frame, unsigned clen, unsigned cols, unsig
 static bool chanDecodeSoft(const int8_t *soft, unsigned clen, unsigned cols, unsigned off, unsigned piece,
 			   uint8_t *content)
 {
-	int8_t inter[360], conv[360];
+	static int8_t inter[360], conv[360];
 	uint8_t buf[23] = { 0 };
 	for (unsigned blk = 0; blk < 5; blk++) {
 		memcpy(inter + blk * piece * 8, soft + (YSF_PAYLOAD_OFFSET + 18u * blk + off) * 8u, piece * 8u);

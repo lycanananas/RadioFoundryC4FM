@@ -5697,32 +5697,6 @@ void radio_sm_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 			break;
 		}
 		int p = ((sm->view.power + req->arg) % n + n) % n;
-#if CONFIG_C4FM
-		// C4FM: three levels as on a Yaesu radio, the board's levels named L, M and H (where it has them)
-		if (sm->view.ch.mode == RADIO_MODE_C4FM) {
-			int lmh[3], k = 0;
-			static const char *const want[3] = { "L", "M", "H" };
-			for (int w = 0; w < 3; w++) {
-				for (int i = 0; i < n; i++) {
-					if (strcmp(board_power_name((uint8_t)i, sm->view.ch.tx_hz), want[w]) == 0) {
-						lmh[k++] = i;
-						break;
-					}
-				}
-			}
-			if (k == 3) {
-				int cur = 0;	// the C4FM level at or below the one in use
-				for (int i = 0; i < 3; i++) {
-					if (sm->view.power >= lmh[i]) {
-						cur = i;
-					}
-				}
-				int step = req->arg > 0 ? 1 : -1;
-				// down from a level between two of them lands on the lower one first
-				p = step < 0 && sm->view.power > lmh[cur] ? lmh[cur] : lmh[(cur + step + 3) % 3];
-			}
-		}
-#endif
 		sm->view.power = (uint8_t)p;
 		sm->temp_power = sm->view.power != channel_power(&sm->view.ch);
 		set_temporary(sm);
