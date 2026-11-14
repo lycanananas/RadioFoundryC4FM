@@ -132,5 +132,6 @@ be measured on real signals before they are flashed. Nothing in this test transm
 | 2026-11-13 | Callsign through a Wires-X repeater | fail | wrong callsign there, fine in direct |
 | 2026-11-14 | Callsign with the FT-70D field layout (CM 1, `*****` + radio ID, FN 5-6) | pass | callsign shown correctly through Wires-X |
 | 2026-11-14 | RX DN from an FT-70D, direct, 2-3 m | pass | BER 0.32 %, FICH bad 1.3 %; score 4-5 |
+| 2026-11-14 | Wires-X from the DM-32 to an MMDVM hotspot (YSFGateway) | pass | status, connect and the reply parsed; a Yaesu node not tried yet |
 | 2026-11-14 | RX through a repeater (5 transmissions captured) | poor | BER 5-8 %: noise; no ISI, timing and DC fine; the RX filter register doesn't change it (the audio copy is taken before it). Soft decisions on the captures: FICH 50-60 % -> 90-100 % good, DCH CRC nearly all good |
 | 2026-11-13 | Voice quality, both ways | fair | sounds like an FT-991A rather than an FT5D |
