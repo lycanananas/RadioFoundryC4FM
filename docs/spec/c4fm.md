@@ -20,9 +20,10 @@ The C4FM fork's radio mode: DN voice (V/D mode 2) beside FM, on one frequency. P
 | Item | |
 |---|---|
 | Voice | DN only: AMBE+2 3600x2450, the frame DMR carries. VW (voice full rate, IMBE) and V/D mode 1 are shown, not played |
-| Identity | A callsign: the radio name's first word (`radio_cwid_callsign`). No contacts, no talk groups, no numeric ID |
+| Identity | A callsign: the radio name's first word (`radio_cwid_callsign`), and a five-character radio ID from the chip's unique ID (`c4fm_radio_id`). No contacts, no talk groups |
 | Selector | DG-ID 0-99 (Settings > My radio > C4FM DG-ID). 00 sends with DG-ID 0 and hears every transmission |
-| Not done | Wires-X, GPS (DT1 / DT2), data FR mode, picture and text, repeater (Fusion link) features, C4FM channels in the codeplug: the VFO's mode is the one way in |
+| Channels | a codeplug channel's mode byte 2 is C4FM, its DG-ID (0-99) in the color code byte; the VFO uses the DG-ID setting |
+| Not done | Wires-X control, GPS (DT1 / DT2), data FR mode, picture and text, repeater (Fusion link) features, the chip's own 4FSK demodulator |
 | License | `core/c4fm/*` and its tests are GPL-2.0-or-later: the layout facts come from MMDVMHost and MMDVM_CM. The rest of the change is MIT, but a build with `CONFIG_C4FM=y` is a GPL work, and none of it can go upstream (docs/CLEANROOM.md) |
 
 ## 2. Why the radio's DMR parts carry C4FM
@@ -53,11 +54,24 @@ One frame: 120 bytes, 960 bits, 480 symbols, 100 ms. Bits numbered from the MSB 
 | Header, terminator | 72 bits CSD1 + 72 bits CSD2 | each: 20 bytes, whitened, CRC-16, rate 1/2 (180 symbols), interleave 20 x 9. CSD1 = destination + source, CSD2 = downlink + uplink (10 characters each) |
 | Communications, DN | 40 bits DCH + 104 bits VCH | DCH: 10 bytes, whitened, CRC-16, rate 1/2 (100 symbols), interleave 20 x 5. VCH: 49 bits, bits 0-26 three times, 27-48 once, one zero bit; whitened; bit interleave 26 x 4 |
 
-FICH fields: FI (0 header, 1 communications, 2 terminator), CS 2, CM 0 (group), BN / BT 0, FN 0..FT, FT 6, DEV 0,
+FICH fields: FI (0 header, 1 communications, 2 terminator), CS 2, CM 1, BN / BT 0, FN 0..FT, FT 6, DEV 0,
 MR 0 (direct), DT 2 (DN), DG-ID. CRC-16: polynomial 0x1021, init 0, inverted, big endian. Convolutional code:
 G1 = 1 + D^3 + D^4, G2 = 1 + D + D^2 + D^4. The whitening sequence and the interleave tables are in `ysf.c`.
 
-DCH by FN (FT 6): 0 destination (`ALL`), 1 source (our callsign), 2 downlink, 3 uplink, 4-5 blank, 6 data (zeros).
+The fields are sent as a Yaesu FT-70D sends them (recorded on air, 2026-11-14), so that repeaters and Wires-X take
+the transmission as they take that radio's:
+
+| Field | Content |
+|---|---|
+| destination (CSD1, DCH FN 0) | `*****` and the radio ID, e.g. `*****K7Q2Z` |
+| source (CSD1, DCH FN 1) | the callsign, space padded |
+| downlink, uplink (CSD2, DCH FN 2-3), remarks 1-2 (FN 4) | spaces |
+| remarks 3-4 (DCH FN 5) | five spaces and the radio ID |
+| data (DCH FN 6) | `01 22 61 5F 2B 03 11 00 00 00`, the FT-70D's (meaning unknown) |
+
+The radio ID: five characters 0-9 A-Z, a hash of the chip's unique ID (`hal_system_t.chip`; the callsign without
+one): the same across restarts, different between radios. Received, the caller's ID is taken from a destination
+`*****ID` or the end of FN 5 (`c4fm.src_id`).
 
 `tests/host/c4fmYsfTest.c` checks every part bit for bit against vectors generated from MMDVM_CM's encoder
 (`c4fmOracle.h`).
@@ -78,13 +92,22 @@ Integer arithmetic only. About 14 multiply-adds per 24 kHz sample for the filter
 `c4fmDspTest.c`: frames bit exact through timing offsets, DC, inversion, a 300-unit level; the FICH survives noise at
 0.35 of the inner level; no false frame in 10 s of noise.
 
+Soft decisions: with each frame the receiver hands over a soft value per bit (`c4fm_frame_info_t.soft`: the
+sample's distance from the decision threshold, 32 to a level unit; the dibit's MSB is -z, its LSB |z| - 2). The
+`ysf*DecodeSoft` decoders run a soft decision Viterbi on the FICH, CSD and DCH and a weighted majority on the VCH's
+three copies of bits 0-26. They are the default (Menu > C4FM > Advanced > Demodulator: Soft decisions / Hard
+decisions). On five transmissions captured through a repeater (raw BER 5-8 %) they decode 90-100 % of the FICHs
+where hard decisions decode 50-60 %, and nearly every DCH; `c4fmDspTest` keeps the gain at noise of half a level.
+The VCH's bits 27-48 have no FEC, so a noisy channel still degrades the voice: the radio's DMR demodulator (4FSK in
+the HR_C7000) is the next step for weak signals.
+
 The modulator (RRC at 24 kHz, decimated to 8 kHz) serves the host tests.
 
 ## 5. Calls
 
 | Phase | Transmit | Receive |
 |---|---|---|
-| Start | 100 ms of `0x77` (+3 -3 ...), header (CSD1 `ALL` / our callsign) | a header, or a communications frame whose FICH decodes (late entry) |
+| Start | 100 ms of `0x77` (+3 -3 ...), header (CSD1 `*****` + radio ID / our callsign) | a header, or a communications frame whose FICH decodes (late entry) |
 | Voice | a frame per five voice frames; DCH cycling by FN | DN: DCH by FN (FN 1 the caller's callsign), five AMBE frames to the voice path. Another DT: shown, not played |
 | Gaps | the modem kept 100-200 ms ahead; a frame still short of voice when the modem runs low is padded with silence | a frame whose FICH fails inside a call is taken as the communications frame due |
 | End | PTT up: the voice left (padded), the terminator, unkey once it has played out | the terminator, a lost signal, or 400 ms without a frame |
@@ -100,12 +123,29 @@ another DG-ID doesn't play.
 
 | Item | |
 |---|---|
-| Mode | `RADIO_MODE_C4FM`, offered with `board.c4fm`. The VFO's Mode tile cycles FM -> C4FM (-> DMR where the build's VFO has it) |
+| Mode | `RADIO_MODE_C4FM`, offered with `board.c4fm`. The VFO's Mode tile cycles FM -> C4FM -> DMR |
 | Board | `set_mode(C4FM)`: the RF side as for DMR, then the C4FM modem. PTT keys the board as for DMR (`key_tx` at 12.5 kHz); the engine starts the stream; the core unkeys once the engine is off the air |
 | State | RX / TX follow the engine's phase; the time-out stops the transmission with its terminator |
-| Settings | `settings_t.c4fm_dgid` (was `reserved9`: an older record reads 0) |
+| Settings | `settings_t`: `c4fm_dgid`, `c4fm_tx_level` (%, 0 = 100), `c4fm_preamble` (100 ms units, 0 = 1), `voice_rx_gain` (dB), `c4fm_flags` (bit 0 plain fields, bits 1-2 the decoder), `c4fm_call` ("" = the radio name's first word). An older record reads 0: the defaults |
+| Power | on a C4FM channel or VFO the power key steps L -> M -> H (the board's levels of those names); FM and DMR keep every level |
+| Channel editor | Mode cycles FM -> DMR -> C4FM; a C4FM channel shows DG-ID (0-99) in place of DMR's and FM's rows. The web codeplug editor (`site/static/js/editor`) has the same mode and field |
 | Home | talk row: our callsign and DG-ID, or the caller's while receiving; chips: DN, power, 12.5k; activity: the caller and the mode heard, then "Last heard" |
-| Build | `CONFIG_C4FM` (needs `CONFIG_DMR`); `make VARIANT=c4fm` turns it on and leaves out what a C4FM / FM radio doesn't need |
+| Build | `CONFIG_C4FM` (needs `CONFIG_DMR`); `make VARIANT=c4fm`: FM, DMR (voice, channels, contacts, SMS) and C4FM, without IP, the cable's network services, the hotspot and the advanced DMR services |
+
+The menus in the C4FM build (`core/ui/ui_menus.c`, `ui_modes.c`):
+
+| Menu row | Opens |
+|---|---|
+| Switch to VFO / Memory | toggles, back to Home |
+| Zones, Channels | as in RadioFoundry |
+| FM | default squelch, busy lockout, roger beep; the channel or VFO in use (FM only): 25 kHz, RX / TX tone (CTCSS / DCS), the VFO's repeater offset |
+| DMR | last caller, contacts, messages, recent, DMR ID and name, reply window, monitor, talker alias, talk permit tone, Data and messages (radio checks, call alerts, SMS format) |
+| C4FM | Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Demodulator, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
+| Tools | as in RadioFoundry |
+| Settings | the shared groups: Sound, Display, Talk & listen (TX timeout, VFO step), Digital voice (mic gain, AGC, noise reduction, voice volume), Power saving, Keys, Key lock, Advanced |
+
+The mode in use shows "in use" on its row. `tests/host/c4fmUiSmoke.sh` opens every page at each display class in the
+simulator built with `CONFIG_C4FM`.
 
 ## 7. The board's modem
 
@@ -120,7 +160,7 @@ dry), discriminator audio in at `rx_rate_hz`. The HR_C7000 version (`drivers/mod
 
 ## 8. Diagnostics and bench registers
 
-Debug link view, section `dmr_ext`:
+Debug link view, section `c4fm`:
 
 | Key | |
 |---|---|
@@ -128,8 +168,26 @@ Debug link view, section `dmr_ext`:
 | `c4fm.dsp_syncs`, `dsp_losts`, `dsp_flywheels` | syncs found, signals lost, frames bridged |
 | `c4fm.rx_gain`, `rx_center`, `rx_inverted` | the last level fit: gain per level unit (inner = 1), DC, polarity |
 | `c4fm.rx_frames`, `rx_fich_bad`, `rx_vch_errors`, `rx_ambe` | frames taken, FICH failures, voice triplets corrected, voice frames played |
+| `c4fm.rx_fich_fec` | FICH bits the Viterbi decoder corrected: raw bit error rate about `rx_fich_fec / (200 * good FICHs)` |
 | `c4fm.tx_frames`, `tx_padded` | frames sent, voice frames padded with silence |
 | `c4fm.drv_*` | the driver: key-ups, slots, slots from the stream / with idle, stalls, interrupts, level, RF_MOD_BIAS_CTRL for DMR and for C4FM |
+
+Section `c4fm_raw`: the last call's fields as another radio sent them, cleared when a call starts. `c4fm.raw_fich`
+(fi,cs,cm,bn,bt,fn,ft,dev,mr,voip,dt,sql,dgid of the last good FICH), `raw_hdr_csd1`, `raw_hdr_csd2`,
+`raw_term_csd1`, `raw_term_csd2` (20 bytes in hex), `raw_dch0` .. `raw_dch7` (10 bytes, by FN); `-` for a part not
+received with a good CRC. `c4fm.raw_serial` counts captures.
+
+The voice settings are the DMR stack's and apply to C4FM: mic gain (SETTING 29), encode options (SETTING 31),
+the test tone (RADIO op 33); their state is in the `dmr` and `features` sections (`voice.*`, `set.mic_gain`).
+
+Section `c4fm_cap`: the bench capture (`c4fm_capture_t`). The receiver's input audio goes through a 2 s ring
+(16000 int16 samples at 8 kHz) and the last 32 frames' figures (sync errors, levels, FICH, FEC) into records. SETTING
+40 arms it (1: freeze 1.5 s after the next call starts), freezes it now (2) or lets it run (0); the keys give the
+state and the RAM addresses, which READ_MEM reads. `tools/c4fm_capture.py` does it per transmission and
+`tests/host/c4fmReplay` runs the receiver on a capture on the host.
+
+`tools/c4fm_bench.py` records overs with these keys, works out error rates and decodes the fields (the boards'
+bench procedures in `docs/testing/`).
 
 CHIP_REG (`rfoundry_debug.py reg CHIP REG [VALUE] --page PAGE`), boards that build C4FM:
 
@@ -141,9 +199,9 @@ CHIP_REG (`rfoundry_debug.py reg CHIP REG [VALUE] --page PAGE`), boards that bui
 ## 9. Open questions
 
 1. The deviation the scaled RF_MOD_BIAS_CTRL gives: linear? Measured against a C4FM receiver's or a service monitor's.
-2. Whether the FM receive copy is flat enough with the band-pass off: de-emphasis and the 3 kHz low-pass are still in
-   the chain. If not: the chip's own DMR demodulator in the physical layer receive mode with the C4FM sync, or a
-   de-emphasis inverse in the receiver.
+2. Measured: the FM receive copy is flat (no ISI on captures) and taken before the chip's FM filters (FM_BANDWIDTH
+   doesn't change it). Through a repeater the noise is the limit (raw BER 5-8 % where direct gives 0.3 %): the chip's
+   own DMR demodulator in the physical layer receive mode with the C4FM sync is the next step.
 3. Whether mic PCM and the vocoder keep their timing in the physical layer mode (the split duplex TX half fed its
    voice from the host).
 4. C4FM receivers' lock on our header after 100 ms of preamble (Yaesu radios key with a longer one).

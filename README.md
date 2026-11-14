@@ -1,3 +1,30 @@
+# RadioFoundry C4FM (proof of concept)
+
+> **This is a fork of [RadioFoundry](https://radiofoundry.org) that adds Yaesu System Fusion (C4FM DN voice) to the
+> Baofeng DM-32UV, beside FM and DMR, in one firmware.** It is a proof of concept: it works on the air with Yaesu radios
+> (callsign, DG-ID, voice both ways, repeaters and Wires-X), and its receiver is still weaker than a Yaesu radio's on
+> weak signals. Everything below this box is RadioFoundry's own README.
+
+| | |
+|---|---|
+| What it does | C4FM DN voice (AMBE+2 2450, the radio's own DMR codec), callsign and radio ID as an FT-70D sends them, DG-ID 0-99, C4FM channels in the codeplug, Last heard, soft decision decoding |
+| Radio | Baofeng DM-32UV (`make BOARD=dm32 VARIANT=c4fm`) |
+| How | the DMR chip's physical layer transmits the 4FSK stream at C4FM deviation; a software receiver demodulates the FM audio; the YSF layer 2 and the call engine are in `core/c4fm/` |
+| Spec | [docs/spec/c4fm.md](docs/spec/c4fm.md) |
+| Install and test | [docs/testing/dm32-c4fm-bench.md](docs/testing/dm32-c4fm-bench.md) |
+| License | RadioFoundry is MIT. `core/c4fm/` and its tests are GPL-2.0-or-later (the YSF layout follows MMDVMHost / MMDVM_CM), so a build with `CONFIG_C4FM=y` is a GPL-2.0-or-later work ([LICENSES/GPL-2.0-or-later.txt](LICENSES/GPL-2.0-or-later.txt)). Not affiliated with the RadioFoundry project or Yaesu |
+
+The AMBE+2 codec is not included: it comes from your radio's stock firmware ([codecs/README.md](codecs/README.md)).
+
+<p>
+<img src="docs/ux/c4fm/menu.png" width="200" alt="Menu: VFO or memory, zones, channels, FM, DMR, C4FM, tools, settings">
+<img src="docs/ux/c4fm/c4fm.png" width="200" alt="Menu > C4FM: last heard, DG-ID, callsign, advanced">
+<img src="docs/ux/c4fm/fm.png" width="200" alt="Menu > FM: squelch, busy lockout, roger beep, tones, offset">
+<img src="docs/ux/c4fm/dmr.png" width="200" alt="Menu > DMR: last caller, contacts, messages, recent, DMR settings">
+</p>
+
+---
+
 # RadioFoundry
 
 **Free, MIT-licensed firmware for affordable DMR radios.** One shared core runs the DMR stack, the UI, the codeplug and
