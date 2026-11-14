@@ -5889,12 +5889,12 @@ static const set_item_t s_c4fm[] = {
 	ACTION(TRN("Callsign"), "C4FM callsign", SA_C4FM_CALL),
 	ACTION(TRN("Advanced"), "C4FM deviation preamble FT-70D test tone debug", SA_C4FM_ADV),
 };
-// Menu > C4FM > Advanced: the bench knobs. Demodulator: the software receiver with soft or hard decisions (the
-// chip's own demodulator is a later value)
+// Menu > C4FM > Advanced: the bench knobs. Decoder: soft or hard decisions after the software demodulator (the one
+// demodulator there is: the chip's own 4FSK demodulator is not used yet)
 static const int16_t v_decoder[] = { 0, 1 };	// C4FM_DECODER_*
-static const char *const n_decoder[] = { TRN("Soft decisions"), TRN("Hard decisions") };
+static const char *const n_decoder[] = { TRN("Soft"), TRN("Hard") };
 static const set_item_t s_c4fm_adv[] = {
-	LIST(TRN("Demodulator"), "C4FM receiver decoder soft hard decisions debug", UI_SET_C4FM_DECODER, v_decoder, n_decoder),
+	LIST(TRN("Decoder"), "C4FM receiver demodulator soft hard decisions debug", UI_SET_C4FM_DECODER, v_decoder, n_decoder),
 	NUMBER(TRN("TX deviation"), "C4FM modulation level", UI_SET_C4FM_TX_LEVEL, 70, 130, 5, "%"),
 	NUMBER(TRN("Preamble"), "C4FM lead-in", UI_SET_C4FM_PREAMBLE, 100, 500, 100, " ms"),
 	TOGGLE(TRN("Send as FT-70D"), "C4FM radio ID Wires-X fields", UI_SET_C4FM_FT70D),

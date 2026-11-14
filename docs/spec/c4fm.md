@@ -95,8 +95,8 @@ Integer arithmetic only. About 14 multiply-adds per 24 kHz sample for the filter
 Soft decisions: with each frame the receiver hands over a soft value per bit (`c4fm_frame_info_t.soft`: the
 sample's distance from the decision threshold, 32 to a level unit; the dibit's MSB is -z, its LSB |z| - 2). The
 `ysf*DecodeSoft` decoders run a soft decision Viterbi on the FICH, CSD and DCH and a weighted majority on the VCH's
-three copies of bits 0-26. They are the default (Menu > C4FM > Advanced > Demodulator: Soft decisions / Hard
-decisions). On five transmissions captured through a repeater (raw BER 5-8 %) they decode 90-100 % of the FICHs
+three copies of bits 0-26. They are the default (Menu > C4FM > Advanced > Decoder: Soft / Hard; Home shows SD or HD).
+The demodulator itself is the software one in all cases. On five transmissions captured through a repeater (raw BER 5-8 %) they decode 90-100 % of the FICHs
 where hard decisions decode 50-60 %, and nearly every DCH; `c4fmDspTest` keeps the gain at noise of half a level.
 The VCH's bits 27-48 have no FEC, so a noisy channel still degrades the voice: the radio's DMR demodulator (4FSK in
 the HR_C7000) is the next step for weak signals.
@@ -140,7 +140,7 @@ The menus in the C4FM build (`core/ui/ui_menus.c`, `ui_modes.c`):
 | Zones, Channels | as in RadioFoundry |
 | FM | default squelch, busy lockout, roger beep; the channel or VFO in use (FM only): 25 kHz, RX / TX tone (CTCSS / DCS), the VFO's repeater offset |
 | DMR | last caller, contacts, messages, recent, DMR ID and name, reply window, monitor, talker alias, talk permit tone, Data and messages (radio checks, call alerts, SMS format) |
-| C4FM | Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Demodulator, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
+| C4FM | Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
 | Tools | as in RadioFoundry |
 | Settings | the shared groups: Sound, Display, Talk & listen (TX timeout, VFO step), Digital voice (mic gain, AGC, noise reduction, voice volume), Power saving, Keys, Key lock, Advanced |
 

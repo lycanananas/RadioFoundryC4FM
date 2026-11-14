@@ -359,7 +359,7 @@ typedef enum {
 	UI_SET_VOICE_RX_GAIN,
 	UI_SET_C4FM_FT70D,
 	UI_SET_C4FM_TEST_TONE,
-	UI_SET_C4FM_DECODER,	// Menu > C4FM > Advanced > Demodulator: C4FM_DECODER_* (settings_t.c4fm_flags bits 1-2)
+	UI_SET_C4FM_DECODER,	// Menu > C4FM > Advanced > Decoder: C4FM_DECODER_* (settings_t.c4fm_flags bits 1-2)
 	// The mode menus (CONFIG_C4FM; ui_modes.c): FM's busy lockout (radio_bcl_t) and roger beep (radio_settings_t), and
 	// the channel or VFO in use: bandwidth 25 kHz 1 / 12.5 kHz 0, RX / TX tone as a tones_picker index, the VFO's
 	// repeater offset in kHz (0 simplex; the VFO only)

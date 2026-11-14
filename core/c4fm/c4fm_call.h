@@ -57,7 +57,7 @@ typedef struct {
 	uint8_t decoder;			// C4FM_DECODER_*
 } c4fm_config_t;
 
-// How received frames are decoded (Menu > C4FM > Advanced > Demodulator)
+// How received frames are decoded after the software demodulator (Menu > C4FM > Advanced > Decoder)
 enum {
 	C4FM_DECODER_SOFT,	// the software receiver with soft decisions (default)
 	C4FM_DECODER_HARD,	// the software receiver with hard decisions (the first version)
