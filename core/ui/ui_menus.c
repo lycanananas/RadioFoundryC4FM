@@ -6223,6 +6223,10 @@ static void set_value_text(const set_item_t *s, int32_t v, char *out, size_t len
 			sb_str(&b, TR("Simplex"));
 			break;
 		}
+		if (s->id == UI_SET_WX_ROOM) {
+			sb_u32(&b, (uint32_t)(v < 0 ? 0 : v), 5);	// Wires-X room IDs are written with five digits: 00001
+			break;
+		}
 #endif
 		sb_i32(&b, v);
 		if (s->unit != NULL)
