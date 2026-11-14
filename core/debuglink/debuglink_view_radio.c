@@ -4,6 +4,9 @@
 // extras, battery, beeps, settings) and the RADIO operations that drive them (scan, beep, tone burst, one setting,
 // roaming)
 #include "config.h"
+#if CONFIG_C4FM
+#include "c4fm/c4fm_call.h"
+#endif
 #include "board.h"
 #include "debuglink/debuglink.h"
 #include "debuglink/debuglink_proto.h"
@@ -33,7 +36,8 @@
 #define DL_SETTING_MIC_GAIN	29u	// SETTING id of the mic gain step (radio/mic_gain.h)
 #define DL_SETTING_ENC_OPTIONS	31u	// SETTING id of the vocoder's encode options (VOCODER_OPT_*)
 #define DL_SETTING_ZS_OFFERS	32u	// SETTING id of zone share offers (zone_share_api.h)
-#define DL_SETTING_REF_TRIM	35u	// SETTING id of the reference trim, ppb two's complement (radio/ref_trim.h)
+#define DL_SETTING_REF_TRIM	35u
+#define DL_SETTING_C4FM_CAPTURE	40u	// the C4FM bench capture: 0 run, 1 arm, 2 freeze now (c4fm_call_capture_ctl)	// SETTING id of the reference trim, ppb two's complement (radio/ref_trim.h)
 
 static const char *word(uint8_t v, const char *const *names, uint8_t n)
 {
@@ -315,8 +319,9 @@ uint8_t debuglink_radio_feature_op(uint8_t op, const uint8_t *a, uint16_t len)
 #endif
 	case DL_OP_DMR_FIELDS:
 		// mode (0xFF = keep, else radio_mode_t), color code (0xFF = keep), timeslot (0 = keep): on a channel they are
-		// temporary changes, in the VFO the VFO's own settings. The radio core refuses what it can't do
-		if (len < 3 || (a[0] != 0xFF && a[0] > RADIO_MODE_DMR) || (a[1] != 0xFF && a[1] > 15) || a[2] > 2) {
+		// temporary changes, in the VFO the VFO's own settings. C4FM only in a build with it; the radio core refuses
+		// what it can't do (C4FM without board.c4fm)
+		if (len < 3 || (a[0] != 0xFF && a[0] > (CONFIG_C4FM ? RADIO_MODE_C4FM : RADIO_MODE_DMR)) || (a[1] != 0xFF && a[1] > 15) || a[2] > 2) {
 			return DL_ST_BAD_ARG;
 		}
 #if CONFIG_DMR
@@ -470,6 +475,15 @@ uint8_t debuglink_radio_feature_op(uint8_t op, const uint8_t *a, uint16_t len)
 			}
 			return DL_ST_OK;
 		}
+#if CONFIG_C4FM
+		if (a[0] == DL_SETTING_C4FM_CAPTURE) {
+			if (v > 2) {
+				return DL_ST_BAD_ARG;
+			}
+			c4fm_call_capture_ctl((uint8_t)v);
+			return DL_ST_OK;
+		}
+#endif
 #if CONFIG_DMR
 		// The encode options for the next frames (dmr-voice.md 6), not stored: a restart or a change of Mic noise
 		// reduction / Mic AGC brings back the settings'. Lets a test send combinations the menu can't (0x800)

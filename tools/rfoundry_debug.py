@@ -156,7 +156,8 @@ PRESS, LONG, REPEAT, DOWN, UP = range(5)
 
 VIEW_SECTIONS = ["core", "channel", "dmr", "dmr_call", "dmr_stats", "hotspot", "link", "features", "dmr_data",
                  "storage", "dmr_ext", "dmr_data_stats", "roam", "aprs", "aprs_set", "dmr_ip", "net", "snmp", "usrp",
-                 "sfr", "tasks", "crash", "watchdog", "reset", "air", "net_svc", "net_link", "cps", "board", "audio"]
+                 "sfr", "tasks", "crash", "watchdog", "reset", "air", "net_svc", "net_link", "cps", "board", "audio",
+                 "c4fm", "c4fm_raw", "c4fm_cap"]
 
 OP_CHANNEL_STEP, OP_ZONE_POS, OP_ZONE, OP_VFO, OP_VFO_SET, OP_VFO_STEP, OP_POWER, OP_SQUELCH, OP_BANDWIDTH, \
     OP_TONE, OP_MONITOR, OP_CLEAR_TEMP, OP_REPLY_CANCEL, OP_HOTSPOT_EXIT, OP_DMR_TARGET, OP_DMR_CONTACT, \
@@ -196,7 +197,7 @@ SETTINGS = {"tot_s": 1, "tot_warn_s": 2, "bcl": 3, "roger_beep": 4, "tx_inhibit"
             "battery_off_s": 18, "scan_beep": 19, "reply_s": 20, "roam_rssi_dbm": 21, "roam_hyst_db": 22,
             "roam_probe": 23, "roam_check_s": 24, "roam_beacon_s": 25, "roam_beacon_len_s": 26, "roam_survey": 27,
             "rpt_beacon": 28, "mic_gain": 29, "dual_delay_ms": 30, "enc_options": 31,
-            "zs_offers": 32, "sfr_cwid": 33, "sfr_rx": 34, "ref_trim": 35}
+            "zs_offers": 32, "sfr_cwid": 33, "sfr_rx": 34, "ref_trim": 35, "c4fm_capture": 40}
 
 
 class DebugLinkError(Exception):
@@ -953,9 +954,9 @@ class DebugLink:
         self.radio(OP_VOLUME, bytes([VOLUME_KNOB if step == "knob" else int(step)]))
 
     def dmr_fields(self, mode=None, cc=None, ts=None):
-        """Mode ("fm" / "dmr"), color code 0..15 and timeslot 1 / 2, each None to keep it. On a channel these are
+        """Mode ("fm" / "dmr" / "c4fm"), color code 0..15 and timeslot 1 / 2, each None to keep it. On a channel these are
         temporary changes, in the VFO the VFO's own settings (RADIO op 31)."""
-        m = 0xFF if mode is None else {"fm": 0, "dmr": 1}[mode]
+        m = 0xFF if mode is None else {"fm": 0, "dmr": 1, "c4fm": 2}[mode]
         self.radio(OP_DMR_FIELDS, bytes([m, 0xFF if cc is None else int(cc), 0 if ts is None else int(ts)]))
 
     def vfo_sfr(self, role, inbound_ts=1, framing=0, hang=0):
@@ -1455,7 +1456,7 @@ def cmd_radio(link, a):
         link.vibrate(args[0] if args else "message")
     elif op == "copy-vfo":            # the channel's settings into the VFO, and open it
         link.vfo_copy()
-    elif op == "mode":                # mode fm|dmr (the VFO's own in the VFO, else temporary)
+    elif op == "mode":                # mode fm|dmr|c4fm (the VFO's own in the VFO, else temporary)
         link.dmr_fields(mode=args[0])
     elif op == "cc":                  # cc 0..15
         link.dmr_fields(cc=num(0))

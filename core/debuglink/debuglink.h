@@ -49,6 +49,9 @@ enum {
 	DL_VIEW_CPS,		// the CPS shims' counters (were in DL_VIEW_STORAGE until view version 5)
 	DL_VIEW_BOARD,		// the board's own keys (board.view_line): pins, ADC, clock, flash, calibration
 	DL_VIEW_AUDIO,		// the beeps' speaker route: stream, lead-in, amplifier hang
+	DL_VIEW_C4FM,		// C4FM: the call engine, the receiver, the driver (docs/spec/c4fm.md 8)
+	DL_VIEW_C4FM_RAW,	// C4FM: the last call's fields as sent, in hex
+	DL_VIEW_C4FM_CAP,	// C4FM: the bench capture's state and RAM addresses (c4fm_capture_t)
 	DL_VIEW_COUNT
 };
 #define DL_VIEW_VERSION		5	// bumped when a key changes meaning or goes away (new keys don't bump it)
@@ -105,6 +108,9 @@ void debuglink_dmr_data_reset(void);
 // The audio probe (debuglink_audio_probe.c, docs/spec/debuglink.md 3.14): built without CONFIG_AUDIO_PROBE it answers
 // unavailable
 size_t debuglink_cmd_audio_probe(const uint8_t *req, uint16_t len, uint8_t *out, size_t cap);
+// The c4fm sections (debuglink_view_c4fm.c): part 0 the counters, 1 the last call's raw fields; without
+// CONFIG_C4FM "c4fm.built=0"; part 2 the bench capture
+void debuglink_view_c4fm(uint8_t part, dl_text_t *t);
 // The dmr_ext section (debuglink_view_ext.c): emergency state, alert and settings, the ETSI data counters, CW ID
 void debuglink_view_dmr_ext(dl_text_t *t);
 // The roam section (debuglink_view_roam.c); built without CONFIG_DMR_ROAMING it says "roam.built=0"
