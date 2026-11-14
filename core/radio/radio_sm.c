@@ -1507,7 +1507,6 @@ static void c4fm_configure(radio_sm_t *sm)
 	c.dgid = !sm->view.vfo && sm->view.ch.mode == RADIO_MODE_C4FM ? sm->view.ch.color_code : sm->c4fm_dgid;
 	c.preamble_ms = sm->c4fm_preamble_ms;
 	c.plain = sm->c4fm_plain;
-	c.decoder = sm->c4fm_decoder;
 	// The radio ID (five characters, as Yaesu radios send it): from the chip's unique ID, so it stays the same
 	// across restarts and differs between radios; without one, from the callsign
 	hal_chip_t chip;
@@ -1520,7 +1519,6 @@ static void c4fm_configure(radio_sm_t *sm)
 	c4fm_call_configure(&c);
 	memcpy(sm->view.c4fm.call, call, sizeof sm->view.c4fm.call);
 	sm->view.c4fm.dgid = c.dgid;
-	sm->view.c4fm.decoder = c.decoder;
 }
 
 // After set_mode(C4FM) and rx()
@@ -4692,7 +4690,6 @@ static void apply_prefs(radio_sm_t *sm, const settings_t *st)
 	sm->c4fm_dgid = st->c4fm_dgid <= C4FM_DGID_MAX ? st->c4fm_dgid : 0;
 	sm->c4fm_preamble_ms = (uint16_t)((st->c4fm_preamble == 0 ? 1u : st->c4fm_preamble) * 100u);
 	sm->c4fm_plain = (st->c4fm_flags & SETTINGS_C4FM_PLAIN) != 0;
-	sm->c4fm_decoder = (uint8_t)((st->c4fm_flags & SETTINGS_C4FM_DECODER_MASK) >> SETTINGS_C4FM_DECODER_SHIFT);
 	memset(sm->c4fm_call, 0, sizeof sm->c4fm_call);
 	memcpy(sm->c4fm_call, st->c4fm_call, sizeof sm->c4fm_call - 1u);
 	if (board.c4fm != NULL && board.c4fm->set_tx_level != NULL) {
@@ -4700,17 +4697,6 @@ static void apply_prefs(radio_sm_t *sm, const settings_t *st)
 		board.c4fm->set_tx_level(lvl == 0 ? 100u : lvl < 70u ? 70u : lvl > 130u ? 130u : lvl);	// next key-up
 	}
 	ambeVoiceSetRxGain(st->voice_rx_gain);
-	if (board.c4fm != NULL && board.c4fm->set_rx_profile != NULL) {
-		uint8_t fe = (uint8_t)((st->c4fm_flags & SETTINGS_C4FM_RXFE_MASK) >> SETTINGS_C4FM_RXFE_SHIFT);
-		if (fe != sm->c4fm_rx_profile) {
-			sm->c4fm_rx_profile = fe;
-			board.c4fm->set_rx_profile(fe);
-			if (sm->c4fm_running) {
-				sm->retune_due = true;	// radio_sm_poll retunes: the board sets the new profile up
-				sm->retune_due_ms = 0;
-			}
-		}
-	}
 	if (sm->c4fm_running) {
 		c4fm_configure(sm);
 		changed(sm);

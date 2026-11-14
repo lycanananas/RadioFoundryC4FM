@@ -136,7 +136,7 @@ C4FMLIB := $(CORE)/c4fm/ysf.c $(CORE)/dmr/ambe/ambeFec.c
 c4fmYsfTest: c4fmYsfTest.c c4fmOracle.h $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
 	$(CC) $(CFLAGS) -o $@ c4fmYsfTest.c $(C4FMLIB)
 c4fmDspTest: c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
-	$(CC) $(CFLAGS) -o $@ c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
+	$(CC) $(CFLAGS) -o $@ c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) -lm
 # The receiver on a bench capture (tools/c4fm_capture.py), for the bench: a helper, not a test
 TESTS   += c4fmReplay
 c4fmReplay: c4fmReplay.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)

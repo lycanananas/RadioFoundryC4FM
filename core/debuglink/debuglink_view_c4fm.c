@@ -45,8 +45,9 @@ static void counters(dl_text_t *t)
 		"c4fm.rx_ambe=%u\n", (unsigned)c->rx_frames, (unsigned)c->rx_fich_bad, (unsigned)c->rx_fich_fec,
 		(unsigned)c->rx_calls, (unsigned)c->rx_vch_errors, (unsigned)c->rx_ambe);
 	dl_text(t, "c4fm.dsp_syncs=%u\nc4fm.dsp_losts=%u\nc4fm.dsp_flywheels=%u\nc4fm.rx_gain=%d\nc4fm.rx_center=%d\n"
-		"c4fm.rx_inverted=%u\n", (unsigned)c->dsp_syncs, (unsigned)c->dsp_losts, (unsigned)c->dsp_flywheels,
-		c->rx_gain, c->rx_center, c->rx_inverted);
+		"c4fm.rx_inverted=%u\nc4fm.rx_eq=%u\n", (unsigned)c->dsp_syncs, (unsigned)c->dsp_losts,
+		(unsigned)c->dsp_flywheels, c->rx_gain, c->rx_center, c->rx_inverted, c->rx_eq);
+	dl_text(t, "c4fm.rx_tone_on=%u\nc4fm.rx_tone=%u.%u\n", c->rx_tone_on, c->rx_tone / 10u, c->rx_tone % 10u);
 	dl_text(t, "c4fm.tx_calls=%u\nc4fm.tx_frames=%u\nc4fm.tx_padded=%u\n", (unsigned)c->tx_calls,
 		(unsigned)c->tx_frames, (unsigned)c->tx_padded);
 	if (board.c4fm != NULL && board.c4fm->stats != NULL) {

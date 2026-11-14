@@ -24,6 +24,8 @@
 #define C4FM_SPS		5	// samples per symbol at 24 kHz
 #define C4FM_RING		128	// matched filter output history (>= 20 symbols + the search window)
 #define C4FM_MAX_MISSES		3
+#define C4FM_EQ_MAX		15	// equalizer taps, at most
+#define C4FM_TONES		50	// the standard CTCSS tones the tone filter knows (c4fmToneHz10)
 
 typedef struct {
 	uint8_t sync_errors;	// bits of the 40-bit sync received wrong
@@ -63,6 +65,20 @@ typedef struct {
 	int32_t center;
 	uint8_t misses;
 	bool flywheel;
+	// Adaptive equalizer (decision-directed LMS, c4fmDemodSetEq): taps step samples apart around the symbol instant,
+	// Q28 weights. It undoes the high-frequency loss of a repeater's chain that the discriminator then passes on as
+	// inter-symbol interference; 0 taps is off
+	uint8_t eq_taps, eq_step, eq_mu;
+	int32_t eq_w[C4FM_EQ_MAX];
+	// Tone filter (c4fmDemodSetToneFilter): some repeaters send a CTCSS tone under the 4FSK, which the receiver takes
+	// for level errors. The data symbols' slicing errors go through a Goertzel filter per standard tone each frame;
+	// a tone well above the rest selects a notch on the input. tone_sel: 1 + the tone's index, 0 none; tone_frames
+	// counts frames into the Goertzel block
+	bool tone_on;
+	uint8_t tone_sel, tone_frames;
+	int32_t nx1, nx2, ny1, ny2;		// the notch's state
+	int32_t g_s1[C4FM_TONES], g_s2[C4FM_TONES];
+	int64_t g_acc[C4FM_TONES];		// tone power per block, leaky over about 4 blocks
 	uint8_t frame[YSF_FRAME_BYTES];
 	int8_t soft[YSF_FRAME_BYTES * 8];
 	c4fm_frame_info_t info;
@@ -74,6 +90,13 @@ typedef struct {
 void c4fmDemodInit(c4fm_demod_t *d, c4fm_frame_cb_t on_frame, c4fm_lost_cb_t on_lost, void *ctx);
 void c4fmDemodReset(c4fm_demod_t *d);
 void c4fmDemodFeed(c4fm_demod_t *d, const int16_t *pcm8k, uint32_t n);
+// Equalizer: taps (odd, <= C4FM_EQ_MAX; 0 off), step (24 kHz samples between taps), mu (the adaptation step, a
+// right shift: larger is slower). Kept across c4fmDemodReset
+void c4fmDemodSetEq(c4fm_demod_t *d, uint8_t taps, uint8_t step, uint8_t mu);
+// Tone filter on or off. The selected tone is kept across c4fmDemodReset (a repeater keeps its tone); off clears it
+void c4fmDemodSetToneFilter(c4fm_demod_t *d, bool on);
+// The selected tone in tenths of Hz (0: none)
+uint16_t c4fmDemodTone(const c4fm_demod_t *d);
 
 // --- modulator ---
 

@@ -4,9 +4,12 @@
 // bit for bit as the radio runs it (core/c4fm/c4fm_dsp.c, ysf.c). Per frame: sync errors, levels, FICH and its FEC,
 // the voice triplets corrected; then totals and the bit error estimates. A helper for the bench, not a test.
 //
-//   c4fmReplay FILE.raw [--soft] [--pre A] [--gain G] [--quiet]
+//   c4fmReplay FILE.raw [--soft] [--eq TAPS,STEP,MU] [--tone] [--pre A] [--gain G] [--quiet]
 //
 // --soft: the soft decision decoders (ysf*DecodeSoft) instead of the hard ones.
+//
+// --eq: the receiver's adaptive equalizer (c4fmDemodSetEq): taps, step in 24 kHz samples, mu shift.
+// --tone: the tone filter (c4fmDemodSetToneFilter): finds a repeater's CTCSS tone and notches it out.
 //
 // --pre A: a first-order pre-emphasis before the receiver, y = (x - A x[-1]) / (1 - A), 0 <= A < 1: undoes a
 // de-emphasis in the radio's audio path, to see whether the frames come out cleaner. --gain G scales the input.
@@ -68,15 +71,20 @@ static void on_lost(void *ctx)
 int main(int argc, char **argv)
 {
 	if (argc < 2) {
-		fprintf(stderr, "usage: c4fmReplay FILE.raw [--pre A] [--gain G] [--quiet]\n");
+		fprintf(stderr, "usage: c4fmReplay FILE.raw [--soft] [--eq TAPS,STEP,MU] [--tone] [--pre A] [--gain G] [--quiet]\n");
 		return 2;
 	}
 	double pre = 0, gain = 1;
+	int eq_taps = 0, eq_step = 5, eq_mu = 6, tone = 0;
 	for (int i = 2; i < argc; i++) {
 		if (strcmp(argv[i], "--pre") == 0 && i + 1 < argc) {
 			pre = atof(argv[++i]);
 		} else if (strcmp(argv[i], "--gain") == 0 && i + 1 < argc) {
 			gain = atof(argv[++i]);
+		} else if (strcmp(argv[i], "--eq") == 0 && i + 1 < argc) {
+			sscanf(argv[++i], "%d,%d,%d", &eq_taps, &eq_step, &eq_mu);
+		} else if (strcmp(argv[i], "--tone") == 0) {
+			tone = 1;
 		} else if (strcmp(argv[i], "--soft") == 0) {
 			soft_dec = 1;
 		} else if (strcmp(argv[i], "--quiet") == 0) {
@@ -101,11 +109,16 @@ int main(int argc, char **argv)
 	}
 	c4fm_demod_t d;
 	c4fmDemodInit(&d, on_frame, on_lost, NULL);
+	c4fmDemodSetEq(&d, (uint8_t)eq_taps, (uint8_t)eq_step, (uint8_t)eq_mu);
+	c4fmDemodSetToneFilter(&d, tone != 0);
 	c4fmDemodFeed(&d, out, (uint32_t)n);
 	unsigned good = fich_ok ? fich_ok : 1, cm = comms ? comms : 1;
 	printf("%s: %zu samples, %u frames (%u flywheel), fich ok %u, sync err avg %.2f, ber fich %.3f%%, ber vch %.3f%% "
 	       "(%u triplets fixed in %u voice frames), dch crc ok %u/%u\n", argv[1], n, frames, flywheels, fich_ok,
 	       frames ? (double)sync_err / frames : 0.0, 100.0 * fich_fec / (200.0 * good),
 	       100.0 * vch_fixed / (81.0 * 5 * cm), vch_fixed, 5 * comms, dch_ok, comms);
+	if (tone) {
+		printf("tone filter: %u.%u Hz\n", c4fmDemodTone(&d) / 10u, c4fmDemodTone(&d) % 10u);
+	}
 	return 0;
 }

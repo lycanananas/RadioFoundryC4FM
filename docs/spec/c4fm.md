@@ -87,15 +87,32 @@ one): the same across restarts, different between radios. Received, the caller's
 | First lock | at most 4 of the 40 sync bits wrong |
 | Tracking | the next sync is looked for within +-2 samples of where it is due, above 0.5 of the ideal and within 6 dB of the last level |
 | Loss | a missed sync is bridged on the old timing (flywheel frame) up to 3 times, then the receiver searches again |
+| Tone filter | some repeaters send a CTCSS tone under the 4FSK. The data symbols' slicing errors run through a Goertzel filter per standard tone (50, 67.0-254.1 Hz) over blocks of 4 frames (2.5 Hz resolution; syncs and flywheel frames as zeros); a tone 6 times above the mean of the others (its neighbors left out) selects a notch (Q 20) on the 8 kHz input; a neighbor of the tone in use takes over only at twice its power. The tone is kept from call to call. Always on (debug link SETTING 43 turns it off for an A/B) |
+| Equalizer | 7 taps a symbol apart around each data symbol, decision-directed normalized LMS (step 2^-6) towards the decided level, DC left out; not adapted on flywheel frames, reset to a pass-through if it runs away. Always on (debug link SETTING 42 turns it off for an A/B) |
 
 Integer arithmetic only. About 14 multiply-adds per 24 kHz sample for the filter, 20 more while searching.
 `c4fmDspTest.c`: frames bit exact through timing offsets, DC, inversion, a 300-unit level; the FICH survives noise at
-0.35 of the inner level; no false frame in 10 s of noise.
+0.35 of the inner level; no false frame in 10 s of noise; with the equalizer, a clean signal stays bit exact and a
+low-passed noisy one loses about a third of the bit errors it had without.
+
+The equalizer: a signal through a repeater reaches the discriminator with less of its upper band than a radio's
+direct signal (a least squares equalizer fitted to the SR5WI captures boosts the band edge, alternating taps; the
+direct captures need none). That is inter-symbol interference, which the matched filter alone leaves in.
+On the eleven repeater captures of 2026-11-14 (`c4fmReplay --eq 7,5,6`) the voice BER drops from 5.6 % to 3.5 % and
+15 % more FICHs decode with hard decisions. Symbol timing is not the problem: the sync spacing is exact and the best
+sampling instant does not drift inside a frame.
+
+The tone filter: SR5WI sends 127.3 Hz under its C4FM (the slicing error's spectrum has a line there, up to 49 times
+the floor, on every capture through it; none on a direct one). Yaesu receivers ignore it; this receiver took it for
+level errors. On the ten voice captures (`c4fmReplay --tone --eq 7,5,6`, the tone found in each within the 2 s) the
+voice BER drops from 5.6 % to 2.2 %; with the notch from the first frame (the radio keeps the tone for the next call)
+to 1.7 %. A notch on a signal without a tone costs about 1 % BER alone and nothing with the equalizer on, so a wrong
+pick is cheap. `c4fmDspTest` checks that a 127.3 Hz tone of 0.4 of a level is found and that none is picked without one.
 
 Soft decisions: with each frame the receiver hands over a soft value per bit (`c4fm_frame_info_t.soft`: the
 sample's distance from the decision threshold, 32 to a level unit; the dibit's MSB is -z, its LSB |z| - 2). The
 `ysf*DecodeSoft` decoders run a soft decision Viterbi on the FICH, CSD and DCH and a weighted majority on the VCH's
-three copies of bits 0-26. They are the default (Menu > C4FM > Advanced > Decoder: Soft / Hard; Home shows SD or HD).
+three copies of bits 0-26. They are the only decoders the radio uses (the hard decision ones remain for the host tests).
 The demodulator itself is the software one in all cases. On five transmissions captured through a repeater (raw BER 5-8 %) they decode 90-100 % of the FICHs
 where hard decisions decode 50-60 %, and nearly every DCH; `c4fmDspTest` keeps the gain at noise of half a level.
 The VCH's bits 27-48 have no FEC, so a noisy channel still degrades the voice: the radio's DMR demodulator (4FSK in
@@ -168,7 +185,7 @@ The menus in the C4FM build (`core/ui/ui_menus.c`, `ui_modes.c`):
 | Zones, Channels | as in RadioFoundry |
 | FM | default squelch, busy lockout, roger beep; the channel or VFO in use (FM only): 25 kHz, RX / TX tone (CTCSS / DCS), the VFO's repeater offset |
 | DMR | last caller, contacts, messages, recent, DMR ID and name, reply window, monitor, talker alias, talk permit tone, Data and messages (radio checks, call alerts, SMS format) |
-| C4FM | Wires-X (5.1), Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (RX front end, Decoder, TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
+| C4FM | Wires-X (5.1), Last heard (latest 10: callsign, radio ID, DG-ID, age), DG-ID, Callsign, Advanced (TX deviation 70-130 %, preamble 100-500 ms, Send as FT-70D, test tone) |
 | Tools | as in RadioFoundry |
 | Settings | the shared groups: Sound, Display, Talk & listen (TX timeout, VFO step), Digital voice (mic gain, AGC, noise reduction, voice volume), Power saving, Keys, Key lock, Advanced |
 
@@ -195,6 +212,8 @@ Debug link view, section `c4fm`:
 | `c4fm.phase`, `src`, `dst`, `dgid`, `dt`, `late` | the engine (phase: 0 idle, 1 RX voice, 2 RX busy, 3 TX, 4 TX ending, 5 denied) |
 | `c4fm.dsp_syncs`, `dsp_losts`, `dsp_flywheels` | syncs found, signals lost, frames bridged |
 | `c4fm.rx_gain`, `rx_center`, `rx_inverted` | the last level fit: gain per level unit (inner = 1), DC, polarity |
+| `c4fm.rx_eq` | the equalizer is on (SETTING 42 sets it until the next configuration) |
+| `c4fm.rx_tone_on`, `rx_tone` | the tone filter is on (SETTING 43), the tone it notches in Hz (0.0 none found) |
 | `c4fm.rx_frames`, `rx_fich_bad`, `rx_vch_errors`, `rx_ambe` | frames taken, FICH failures, voice triplets corrected, voice frames played |
 | `c4fm.rx_fich_fec` | FICH bits the Viterbi decoder corrected: raw bit error rate about `rx_fich_fec / (200 * good FICHs)` |
 | `c4fm.tx_frames`, `tx_padded` | frames sent, voice frames padded with silence |
@@ -227,12 +246,13 @@ CHIP_REG (`rfoundry_debug.py reg CHIP REG [VALUE] --page PAGE`), boards that bui
 ## 9. Open questions
 
 1. The deviation the scaled RF_MOD_BIAS_CTRL gives: linear? Measured against a C4FM receiver's or a service monitor's.
-2. Measured: the FM receive copy is flat (no ISI on captures) and taken before the chip's FM filters (FM_BANDWIDTH
-   doesn't change it). Through a repeater at -83..-100 dBm the raw BER is 8-10 % (direct, strong: 0.3 %), where
-   Yaesu radios decode cleanly: the receive path loses SNR. Under test: the RF chip's set-up for C4FM (Menu > C4FM >
-   Advanced > RX front end, `hal_c4fm_t.set_rx_profile`; DMR's flat discriminator and filter, the 25 kHz filter, or
-   the RF chip's own FM demodulator), compared on traffic with `c4fm_capture.py monitor --rotate-fe 0,1,2,3`; then
-   the chip's own 4FSK demodulator.
+2. Measured: the FM receive copy is taken before the chip's FM filters (FM_BANDWIDTH doesn't change it). Through
+   a repeater at -83..-100 dBm the receiver gave a raw BER of 4-8 % (direct, strong: 0.3 %), where Yaesu radios
+   decode cleanly. Most of it was the repeater's CTCSS tone under the 4FSK (the tone filter, section 4) and
+   inter-symbol interference (the equalizer): with both, about 1-2 %. The RF chip's other set-ups were tried and
+   dropped: its own FM demodulator gives voice-filtered, de-emphasized audio (no-signal noise 75 % at 300-1000 Hz,
+   2 % under 300 Hz) on which the receiver finds no sync; the 25 kHz filter gained nothing. The DMR set-up is fixed.
+   Next, if weak signals still need it: the chip's own 4FSK demodulator.
 3. Whether mic PCM and the vocoder keep their timing in the physical layer mode (the split duplex TX half fed its
    voice from the host).
 4. C4FM receivers' lock on our header after 100 ms of preamble (Yaesu radios key with a longer one).

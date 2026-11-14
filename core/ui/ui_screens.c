@@ -302,14 +302,12 @@ static void draw_talk_c4fm(const radio_view_t *v)
 	gfx_text(f, x, L->talk_y, fit, col);
 }
 
-// C4FM's chips: the mode, the receiver's decoder (SD soft decisions, HD hard; Menu > C4FM > Advanced), power
+// C4FM's chips: the mode, power, bandwidth
 static void draw_chips_c4fm(const radio_view_t *v)
 {
 	const ui_layout_t *L = &ui_layout;
 	const font_t *f = L->small;
 	int x = gfx_text(f, 0, L->chips_y, "DN", ui_col.fg) + f->w;
-	x = gfx_text(f, x, L->chips_y, v->c4fm.decoder == 0 ? "SD" : "HD", v->c4fm.decoder == 0 ? ui_col.fg : ui_col.warn) +
-	    f->w;
 	bool pw_temp = v->power != channel_power(v);
 	if (pw_temp)
 		x = gfx_text(f, x, L->chips_y, GLYPH_DOT, ui_col.warn);

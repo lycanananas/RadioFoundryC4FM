@@ -414,7 +414,7 @@ static void onFrameBody(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_i
 {
 	ysf_fich_t f;
 	ysf_fec_info_t fec;
-	bool soft = cfg.decoder == C4FM_DECODER_SOFT && info->soft != NULL;
+	bool soft = info->soft != NULL;	// soft decisions: the hard ones lost half the FICHs through a repeater
 	bool fich = soft ? ysfFichDecodeSoft(info->soft, &f, &fec) : ysfFichDecode(frame, &f, &fec);
 	*fich_out = fich;
 	*fec_out = fich ? fec.errors : 0;
@@ -427,6 +427,7 @@ static void onFrameBody(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_i
 	view.rx_gain = info->gain;
 	view.rx_center = info->center;
 	view.rx_inverted = info->inverted;
+	view.rx_tone = c4fmDemodTone(&demod);
 	if (!fich) {
 		view.rx_fich_bad++;
 		if (view.phase != C4FM_PHASE_RX_VOICE || info->flywheel) {
@@ -870,6 +871,8 @@ void c4fm_call_init(const hal_c4fm_t *m)
 	wx.sent = 0xFF;
 	wx_pending = false;
 	c4fmDemodInit(&demod, onFrame, onLost, NULL);
+	c4fm_call_set_equalizer(true);
+	c4fm_call_set_tone_filter(true);
 	running = false;
 	ptt = false;
 	in_call = false;
@@ -900,7 +903,25 @@ void c4fm_call_configure(const c4fm_config_t *c)
 	cfg.preamble_ms = c->preamble_ms == 0 ? 100 : c->preamble_ms > C4FM_PREAMBLE_MAX_MS ? C4FM_PREAMBLE_MAX_MS
 		: (uint16_t)((c->preamble_ms + 99) / 100 * 100);
 	cfg.plain = c->plain;
-	cfg.decoder = c->decoder < C4FM_DECODER_COUNT ? c->decoder : C4FM_DECODER_SOFT;
+}
+
+void c4fm_call_set_tone_filter(bool on)
+{
+	c4fmDemodSetToneFilter(&demod, on);
+	view.rx_tone_on = on;
+	view.rx_tone = c4fmDemodTone(&demod);
+}
+
+// The equalizer's shape (bench, tests/host/c4fmReplay --eq on SR5WI captures): 7 taps a symbol apart; mu 2^-6 of the
+// normalized step settles in a few frames and halves the voice bit errors from a repeater
+#define EQ_TAPS		7u
+#define EQ_STEP		5u
+#define EQ_MU		6u
+
+void c4fm_call_set_equalizer(bool on)
+{
+	c4fmDemodSetEq(&demod, on ? EQ_TAPS : 0, EQ_STEP, EQ_MU);
+	view.rx_eq = on;
 }
 
 bool c4fm_call_start(void)

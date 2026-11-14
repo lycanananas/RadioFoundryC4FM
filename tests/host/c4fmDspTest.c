@@ -2,6 +2,7 @@
 // Copyright (c) 2026 The RadioFoundry Authors
 // C4FM baseband (core/c4fm/c4fm_dsp.c): modulator -> channel (gain, DC, polarity, noise, timing offset) -> receiver,
 // frames compared bit for bit and through the YSF FEC.
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,6 +103,15 @@ static void onLost(void *ctx)
 	((rx_t *)ctx)->lost++;
 }
 
+// The receiver's equalizer (c4fmDemodSetEq) and a one-pole low-pass on the channel (a repeater chain's lost highs:
+// y += (x - y) * lp / 256; 0 = none), for the runs that set them
+static bool eq_on;
+static int chan_lp;
+// A CTCSS tone added to the channel (a repeater's, under the 4FSK): amplitude, 0 none; and the receiver's tone filter
+static int chan_tone;
+static bool tone_on;
+static uint16_t tone_found;
+
 static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_samples)
 {
 	static int16_t audio[200000];
@@ -122,8 +132,16 @@ static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_sampl
 	for (uint32_t i = 0; i < 4000; i++) {
 		audio[n++] = 0;	// silence after: the receiver must give up
 	}
+	int32_t lp = 0;
 	for (uint32_t i = 0; i < n; i++) {
 		int32_t v = audio[i];
+		if (chan_tone != 0) {
+			v += (int32_t)(chan_tone * sin(2.0 * M_PI * 127.3 * i / 8000.0));
+		}
+		if (chan_lp != 0) {
+			lp += ((v - lp) * chan_lp) / 256;
+			v = lp;
+		}
 		if (invert) {
 			v = -v;
 		}
@@ -133,9 +151,12 @@ static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_sampl
 	rx_t r = { 0 };
 	c4fm_demod_t d;
 	c4fmDemodInit(&d, onFrame, onLost, &r);
+	c4fmDemodSetEq(&d, eq_on ? 7 : 0, 5, 6);
+	c4fmDemodSetToneFilter(&d, tone_on);
 	for (uint32_t i = 0; i < n; i += 256) {
 		c4fmDemodFeed(&d, &audio[i], n - i < 256 ? n - i : 256);
 	}
+	tone_found = c4fmDemodTone(&d);
 	return r;
 }
 
@@ -173,6 +194,48 @@ int main(void)
 	printf("noise rms 0.5 level: %d frames, FICH ok %d hard, %d soft\n", r.got, r.fich_ok, r.fich_soft_ok);
 	CHECK(r.fich_soft_ok >= r.fich_ok + 2 && r.fich_soft_ok >= (r.got * 3) / 4,
 	      "noise rms 0.5 level: soft decisions keep more FICHs (%d hard, %d soft of %d)", r.fich_ok, r.fich_soft_ok, r.got);
+
+	// The equalizer (bench: SR5WI's highs come through a repeater chain short): on a clean signal it changes nothing;
+	// on a low-passed noisy one it takes out most of the inter-symbol interference
+	eq_on = true;
+	r = run(2000, 0, false, 0, 37);
+	CHECK(r.got == NFRAMES && r.exact == NFRAMES, "equalizer, clean: %d frames, %d exact", r.got, r.exact);
+	r = run(1500, 3000, true, 0, 11);
+	CHECK(r.exact == NFRAMES && r.inverted, "equalizer, inverted, DC offset: %d exact", r.exact);
+	chan_lp = 110;
+	eq_on = false;
+	rx_t plain = run(2000, 0, false, 300, 3);
+	eq_on = true;
+	r = run(2000, 0, false, 300, 3);
+	printf("low-passed channel: %u bit errors plain, %u equalized (%d / %d frames)\n", plain.bit_errors, r.bit_errors,
+	       plain.got, r.got);
+	CHECK(r.got >= plain.got && plain.bit_errors > 0 && r.bit_errors * 2 < plain.bit_errors,
+	      "equalizer halves the bit errors on a low-passed channel (%u plain, %u equalized)", plain.bit_errors,
+	      r.bit_errors);
+	chan_lp = 0;
+	eq_on = false;
+
+	// The tone filter (bench: SR5WI sends 127.3 Hz under its C4FM, 2026-11-14): it finds a tone of 0.4 of a level
+	// in noise and takes out the errors it caused; on a signal without one it picks none
+	eq_on = true;
+	tone_on = true;
+	r = run(2000, 0, false, 300, 3);
+	CHECK(r.got == NFRAMES && tone_found == 0, "tone filter, no tone: %d frames, tone %u", r.got, tone_found);
+	chan_tone = 800;
+	tone_on = false;
+	plain = run(2000, 0, false, 300, 3);
+	tone_on = true;
+	r = run(2000, 0, false, 300, 3);
+	printf("127.3 Hz tone: %u bit errors plain, %u with the tone filter (found %u.%u Hz)\n", plain.bit_errors,
+	       r.bit_errors, tone_found / 10u, tone_found % 10u);
+	CHECK(tone_found == 1273, "tone filter finds 127.3 Hz (%u)", tone_found);
+	// The first block of frames still carries the tone's errors (the radio keeps the tone for the next call)
+	CHECK(plain.bit_errors > 0 && r.bit_errors * 3 < plain.bit_errors * 2,
+	      "tone filter takes out a third of the bit errors or more (%u plain, %u filtered)", plain.bit_errors,
+	      r.bit_errors);
+	chan_tone = 0;
+	tone_on = false;
+	eq_on = false;
 
 	// Pure noise must not deliver frames that pass the FICH CRC
 	{

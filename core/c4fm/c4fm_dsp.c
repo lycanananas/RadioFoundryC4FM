@@ -4,6 +4,7 @@
 #include "c4fm_dsp.h"
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 // Root raised cosine, alpha 0.2, 8 symbols at 5 samples per symbol (41 taps). RX: sum 3 x 2^14 (the 8 -> 24 kHz
@@ -159,6 +160,179 @@ static unsigned syncErrors(const c4fm_demod_t *d, uint32_t n)
 	return errs;
 }
 
+// --- tone filter ---
+
+// The standard CTCSS tones: tenths of Hz, the Goertzel coefficient at the symbol rate (2 cos(2 pi f / 4800), Q14),
+// and the input notch at 8 kHz (Q 20; b0 = b2, a1 = b1; Q29), generated with scipy.signal.iirnotch
+static const struct {
+	uint16_t hz10;
+	int16_t g;
+	int32_t b0, b1, a2;
+} tones[C4FM_TONES] = {
+	{ 670, 32642, 536165563, -1070846805, 535460215 },
+	{ 693, 32633, 536141383, -1070694883, 535411853 },
+	{ 719, 32623, 536114051, -1070518955, 535357190 },
+	{ 744, 32613, 536087773, -1070345601, 535304633 },
+	{ 770, 32602, 536060446, -1070160953, 535249980 },
+	{ 797, 32590, 536032072, -1069964501, 535193231 },
+	{ 825, 32577, 536002649, -1069755712, 535134387 },
+	{ 854, 32563, 535972180, -1069534038, 535073447 },
+	{ 885, 32548, 535939612, -1069290968, 535008313 },
+	{ 915, 32533, 535908099, -1069049733, 534945287 },
+	{ 948, 32516, 535873439, -1068777552, 534875967 },
+	{ 974, 32502, 535846135, -1068558075, 534821357 },
+	{ 1000, 32488, 535818833, -1068334164, 534766754 },
+	{ 1035, 32468, 535782085, -1068025748, 534693257 },
+	{ 1072, 32446, 535743242, -1067690980, 534615572 },
+	{ 1109, 32423, 535704405, -1067347244, 534537898 },
+	{ 1148, 32399, 535663475, -1066975226, 534456038 },
+	{ 1188, 32373, 535621502, -1066583329, 534372091 },
+	{ 1230, 32344, 535577437, -1066160575, 534283962 },
+	{ 1273, 32314, 535532330, -1065715810, 534193749 },
+	{ 1318, 32282, 535485134, -1065237423, 534099356 },
+	{ 1365, 32246, 535435849, -1064723660, 534000786 },
+	{ 1413, 32209, 535385524, -1064184090, 533900137 },
+	{ 1462, 32170, 535334161, -1063617785, 533797411 },
+	{ 1514, 32127, 535279664, -1062999700, 533688417 },
+	{ 1567, 32081, 535224131, -1062351614, 533577349 },
+	{ 1598, 32054, 535191654, -1061964076, 533512396 },
+	{ 1622, 32032, 535166514, -1061659755, 533462115 },
+	{ 1655, 32002, 535131949, -1061235201, 533392986 },
+	{ 1679, 31980, 535106814, -1060921992, 533342717 },
+	{ 1713, 31948, 535071211, -1060471877, 533271509 },
+	{ 1738, 31924, 535045034, -1060136125, 533219157 },
+	{ 1773, 31889, 535008392, -1059659260, 533145872 },
+	{ 1799, 31864, 534981175, -1059299877, 533091438 },
+	{ 1835, 31827, 534943495, -1058795038, 533016077 },
+	{ 1862, 31799, 534915238, -1058410901, 532959564 },
+	{ 1899, 31761, 534876521, -1057876827, 532882129 },
+	{ 1928, 31730, 534846178, -1057452038, 532821445 },
+	{ 1966, 31689, 534806425, -1056887189, 532741938 },
+	{ 1995, 31657, 534776091, -1056449842, 532681269 },
+	{ 2035, 31612, 534734256, -1055837695, 532597600 },
+	{ 2065, 31578, 534702884, -1055371809, 532534856 },
+	{ 2107, 31530, 534658970, -1054709818, 532447028 },
+	{ 2181, 31442, 534581615, -1053515802, 532292317 },
+	{ 2257, 31348, 534502192, -1052252839, 532133471 },
+	{ 2291, 31306, 534466668, -1051675811, 532062424 },
+	{ 2336, 31248, 534419659, -1050900686, 531968405 },
+	{ 2418, 31140, 534334018, -1049454844, 531797125 },
+	{ 2503, 31025, 534245274, -1047910656, 531619635 },
+	{ 2541, 30972, 534205609, -1047205370, 531540306 },
+};
+
+// The Goertzel filters run over TONE_BLOCK frames in symbol time (the syncs and flywheel frames as zeros, so the
+// phase carries on): 1920 symbols resolve 2.5 Hz, enough for tones 3-5 Hz apart, where one frame (10 Hz) is not
+#define TONE_BLOCK	4
+#define TONE_RATIO	6	// the tone's power over the mean of the others (not its neighbors, which its own leak lifts)
+
+void c4fmDemodSetToneFilter(c4fm_demod_t *d, bool on)
+{
+	d->tone_on = on;
+	if (!on) {
+		d->tone_sel = 0;
+	}
+	d->nx1 = d->nx2 = d->ny1 = d->ny2 = 0;
+}
+
+uint16_t c4fmDemodTone(const c4fm_demod_t *d)
+{
+	return d->tone_sel != 0 ? tones[d->tone_sel - 1u].hz10 : 0;
+}
+
+static int16_t notch(c4fm_demod_t *d, int16_t x)
+{
+	if (d->tone_sel == 0) {
+		return x;
+	}
+	const unsigned k = d->tone_sel - 1u;
+	int64_t acc = (int64_t)tones[k].b0 * (x + d->nx2) + (int64_t)tones[k].b1 * (d->nx1 - d->ny1) -
+		      (int64_t)tones[k].a2 * d->ny2;
+	int32_t y = (int32_t)(acc >> 29);
+	d->nx2 = d->nx1;
+	d->nx1 = x;
+	d->ny2 = d->ny1;
+	d->ny1 = y;
+	return (int16_t)(y > 32767 ? 32767 : y < -32768 ? -32768 : y);
+}
+
+static void toneStep(c4fm_demod_t *d, int32_t e)
+{
+	for (unsigned k = 0; k < C4FM_TONES; k++) {
+		int32_t s0 = e + (int32_t)(((int64_t)tones[k].g * d->g_s1[k]) >> 14) - d->g_s2[k];
+		d->g_s2[k] = d->g_s1[k];
+		d->g_s1[k] = s0;
+	}
+}
+
+// The sync's 20 symbols: zeros, so the filters keep their phase across the frame boundary
+static void toneFrameStart(c4fm_demod_t *d)
+{
+	if (!d->tone_on) {
+		return;
+	}
+	for (unsigned i = 0; i < SYNC_SYMS; i++) {
+		toneStep(d, 0);
+	}
+}
+
+// One data symbol's slicing error (64 to a level unit) into every tone's Goertzel filter (zero on a flywheel frame)
+static void toneSymbol(c4fm_demod_t *d, int32_t y, uint8_t dibit)
+{
+	if (!d->tone_on) {
+		return;
+	}
+	int32_t e = 0;
+	if (!d->flywheel && d->gain16 != 0) {
+		int32_t want = d->center + (int32_t)(c4fmLevel(dibit) * (d->gain16 / 16));
+		e = (int32_t)(((int64_t)(y - want) * 64 * 16) / d->gain16);
+		e = e > 255 ? 255 : e < -255 ? -255 : e;
+	}
+	toneStep(d, e);
+}
+
+// Every TONE_BLOCK frames: the block's tone powers into the leaky sums; a tone well above the others becomes the notch
+static void toneFrameEnd(c4fm_demod_t *d)
+{
+	if (!d->tone_on || ++d->tone_frames % TONE_BLOCK != 0) {
+		return;
+	}
+	int64_t total = 0;
+	unsigned best = 0;
+	for (unsigned k = 0; k < C4FM_TONES; k++) {
+		int64_t s1 = d->g_s1[k], s2 = d->g_s2[k];
+		int64_t pw = s1 * s1 + s2 * s2 - ((tones[k].g * s1 * s2) >> 14);
+		d->g_acc[k] += (pw < 0 ? 0 : pw) - d->g_acc[k] / 4;
+		total += d->g_acc[k];
+		if (d->g_acc[k] > d->g_acc[best]) {
+			best = k;
+		}
+	}
+	memset(d->g_s1, 0, sizeof d->g_s1);
+	memset(d->g_s2, 0, sizeof d->g_s2);
+	if (d->tone_sel == best + 1u) {
+		return;
+	}
+	int64_t rest = total;
+	unsigned n = C4FM_TONES;
+	for (unsigned k = best == 0 ? 0 : best - 1u; k <= best + 1u && k < C4FM_TONES; k++) {
+		rest -= d->g_acc[k];
+		n--;
+	}
+	// A neighbor of the tone in use (3-5 Hz away: its leak is large on a short block) has to be twice as strong to
+	// take over: the bench saw SR5WI's 127.3 Hz flip to 131.8 Hz and back on a 0.5 s fragment
+	if (d->tone_sel != 0) {
+		unsigned cur = d->tone_sel - 1u;
+		if ((best + 1u == cur || cur + 1u == best) && d->g_acc[best] < 2 * d->g_acc[cur]) {
+			return;
+		}
+	}
+	if (rest > 0 && d->g_acc[best] * n >= (int64_t)TONE_RATIO * rest) {
+		d->tone_sel = (uint8_t)(best + 1u);
+		d->nx1 = d->nx2 = d->ny1 = d->ny2 = 0;
+	}
+}
+
 static void startFrame(c4fm_demod_t *d, uint32_t sync_end, bool flywheel)
 {
 	d->sync_end = sync_end;
@@ -171,6 +345,7 @@ static void startFrame(c4fm_demod_t *d, uint32_t sync_end, bool flywheel)
 	d->info.inverted = d->gain16 < 0;
 	d->info.gain = (int16_t)(d->gain16 / 16);
 	d->info.center = (int16_t)d->center;
+	toneFrameStart(d);
 }
 
 static void search(c4fm_demod_t *d)
@@ -204,18 +379,85 @@ static void search(c4fm_demod_t *d)
 	}
 }
 
+// --- equalizer ---
+
+static void eqIdentity(c4fm_demod_t *d)
+{
+	memset(d->eq_w, 0, sizeof d->eq_w);
+	d->eq_w[d->eq_taps / 2u] = 1 << 28;
+}
+
+void c4fmDemodSetEq(c4fm_demod_t *d, uint8_t taps, uint8_t step, uint8_t mu)
+{
+	if (taps > C4FM_EQ_MAX) {
+		taps = C4FM_EQ_MAX;
+	}
+	d->eq_taps = taps == 0 ? 0 : (uint8_t)(taps | 1u);
+	d->eq_step = step == 0 ? 1 : step;
+	d->eq_mu = mu;
+	eqIdentity(d);
+}
+
+// The equalized sample for the symbol at m: the taps around it, the DC (center) left alone
+static int32_t equalize(const c4fm_demod_t *d, uint32_t m)
+{
+	if (d->eq_taps == 0) {
+		return ysamp(d, m);
+	}
+	int64_t acc = 0;
+	uint32_t first = m - (uint32_t)(d->eq_taps / 2u) * d->eq_step;
+	for (unsigned k = 0; k < d->eq_taps; k++) {
+		acc += (int64_t)d->eq_w[k] * (ysamp(d, first + k * d->eq_step) - d->center);
+	}
+	int32_t y = d->center + (int32_t)(acc >> 28);
+	return y > 32767 ? 32767 : y < -32768 ? -32768 : y;
+}
+
+// Normalized LMS towards the decided level: w += e x / (taps P) / 2^mu, P the signal's power at this gain (the four
+// levels' mean square is 5). Not on flywheel frames (the decisions are guesses), and back to a plain pass-through if
+// the weights run away
+static void adapt(c4fm_demod_t *d, uint32_t m, int32_t y, uint8_t dibit)
+{
+	if (d->eq_taps == 0 || d->flywheel || d->gain16 == 0) {
+		return;
+	}
+	int64_t g = d->gain16 / 16;
+	int32_t want = d->center + (int32_t)(c4fmLevel(dibit) * g);
+	int64_t den = (int64_t)d->eq_taps * 5 * g * g;
+	if (den <= 0) {
+		return;
+	}
+	int64_t sc = ((int64_t)(want - y) << (36 - d->eq_mu)) / den;	// Q36 per sample unit
+	uint32_t first = m - (uint32_t)(d->eq_taps / 2u) * d->eq_step;
+	bool bad = false;
+	for (unsigned k = 0; k < d->eq_taps; k++) {
+		int64_t w = d->eq_w[k] + ((sc * (ysamp(d, first + k * d->eq_step) - d->center)) >> 8);
+		if (w > (6ll << 28) || w < -(6ll << 28)) {
+			bad = true;
+		}
+		d->eq_w[k] = (int32_t)(w > INT32_MAX ? INT32_MAX : w < INT32_MIN ? INT32_MIN : w);
+	}
+	if (bad || d->eq_w[d->eq_taps / 2u] < (1 << 26)) {
+		eqIdentity(d);
+	}
+}
+
 // The data of the frame is complete: hand it over, then look for the next sync when its window has passed
 static void locked(c4fm_demod_t *d)
 {
 	if (d->sym < DATA_SYMS) {
-		if (d->n == d->sync_end + (uint32_t)(C4FM_SPS * (d->sym + 1))) {
+		uint32_t delay = (uint32_t)(d->eq_taps / 2u) * d->eq_step;
+		if (d->n == d->sync_end + (uint32_t)(C4FM_SPS * (d->sym + 1)) + delay) {
 			unsigned bit = 2u * (SYNC_SYMS + d->sym);
-			int32_t y = ysamp(d, d->n);
+			int32_t y = equalize(d, d->n - delay);
 			uint8_t dibit = slice(d, y);
+			adapt(d, d->n - delay, y, dibit);
+			toneSymbol(d, y, dibit);
 			ysfPutBit(d->frame, bit, dibit >> 1);
 			ysfPutBit(d->frame, bit + 1, dibit & 1);
 			softBits(d, y, &d->soft[bit]);
 			if (++d->sym == DATA_SYMS) {
+				toneFrameEnd(d);
 				d->frames++;
 				d->flywheels += d->flywheel;
 				for (unsigned k = 0; k < 2u * SYNC_SYMS; k++) {
@@ -274,16 +516,22 @@ void c4fmDemodReset(c4fm_demod_t *d)
 	c4fm_frame_cb_t f = d->on_frame;
 	c4fm_lost_cb_t l = d->on_lost;
 	void *ctx = d->ctx;
+	uint8_t taps = d->eq_taps, step = d->eq_step, mu = d->eq_mu, tone = d->tone_sel;
+	bool tone_on = d->tone_on;
 	memset(d, 0, sizeof *d);
 	d->on_frame = f;
 	d->on_lost = l;
 	d->ctx = ctx;
+	c4fmDemodSetEq(d, taps, step, mu);
+	c4fmDemodSetToneFilter(d, tone_on);
+	d->tone_sel = tone_on ? tone : 0;	// a repeater keeps its tone from one call to the next
 	d->n = 0xFFFFFFFFu;	// the first sample is n = 0
 }
 
 void c4fmDemodInit(c4fm_demod_t *d, c4fm_frame_cb_t on_frame, c4fm_lost_cb_t on_lost, void *ctx)
 {
 	initTables();
+	memset(d, 0, sizeof *d);
 	d->on_frame = on_frame;
 	d->on_lost = on_lost;
 	d->ctx = ctx;
@@ -294,7 +542,7 @@ void c4fmDemodFeed(c4fm_demod_t *d, const int16_t *pcm8k, uint32_t count)
 {
 	for (uint32_t i = 0; i < count; i++) {
 		d->xpos = (uint8_t)((d->xpos + 1u) & 15u);
-		d->x[d->xpos] = pcm8k[i];
+		d->x[d->xpos] = notch(d, pcm8k[i]);
 		for (int p = 0; p < 3; p++) {
 			int32_t acc = 0;
 			for (int j = 0; 3 * j + p < NTAPS; j++) {

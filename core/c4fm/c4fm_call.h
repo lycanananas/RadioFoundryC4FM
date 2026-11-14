@@ -99,15 +99,7 @@ typedef struct {
 	char radio_id[C4FM_RADIO_ID_LEN + 1];	// ours (c4fm_radio_id); "" = "00000"
 	uint16_t preamble_ms;			// before the header, 100-C4FM_PREAMBLE_MAX_MS; 0 = 100
 	bool plain;				// destination ALL and CM 0, not an FT-70D's fields
-	uint8_t decoder;			// C4FM_DECODER_*
 } c4fm_config_t;
-
-// How received frames are decoded after the software demodulator (Menu > C4FM > Advanced > Decoder)
-enum {
-	C4FM_DECODER_SOFT,	// the software receiver with soft decisions (default)
-	C4FM_DECODER_HARD,	// the software receiver with hard decisions (the first version)
-	C4FM_DECODER_COUNT
-};
 
 typedef struct {
 	uint8_t phase;		// c4fm_phase_t
@@ -125,6 +117,9 @@ typedef struct {
 	uint32_t dsp_syncs, dsp_losts, dsp_flywheels;
 	int16_t rx_gain, rx_center;	// the receiver's last level fit
 	bool rx_inverted;
+	bool rx_eq;			// the receiver's equalizer is on
+	bool rx_tone_on;		// the receiver's tone filter is on
+	uint16_t rx_tone;		// the tone it notches, tenths of Hz (0 none found)
 	// FICH bits the Viterbi decoder corrected, summed over the good FICHs (200 coded bits each): the raw bit error
 	// rate is about rx_fich_fec / (200 * rx_fich_ok). rx_fich_bad counts every failed FICH, also outside a call
 	uint32_t rx_fich_fec, rx_fich_ok;
@@ -182,6 +177,10 @@ typedef struct {
 const c4fm_capture_t *c4fm_call_capture(void);
 // 0 run (the ring records continuously), 1 arm (freeze after the next call starts), 2 freeze now
 void c4fm_call_capture_ctl(uint8_t cmd);
+// The receiver's equalizer and tone filter on or off (bench A/B over the debug link; both on from the start, there is
+// no setting). The tone filter off forgets the tone found
+void c4fm_call_set_equalizer(bool on);
+void c4fm_call_set_tone_filter(bool on);
 // The configuration in force (our callsign and DG-ID)
 const c4fm_config_t *c4fm_call_config(void);
 // Send a Wires-X command (C4FM_WX_*; room: the 5-digit room ID for CONNECT, the first entry (1-based) for ALL). The radio core keys the transmitter first;

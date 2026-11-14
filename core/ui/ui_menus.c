@@ -5910,16 +5910,9 @@ static const set_item_t s_wx[] = {
 	ACTION(TRN("Disconnect"), "Wires-X disconnect leave room", SA_WX_DISCONNECT),
 };
 
-// Menu > C4FM > Advanced: the bench knobs. Decoder: soft or hard decisions after the software demodulator (the one
-// demodulator there is: the chip's own 4FSK demodulator is not used yet)
-static const int16_t v_decoder[] = { 0, 1 };	// C4FM_DECODER_*
-static const char *const n_decoder[] = { TRN("Soft"), TRN("Hard") };
-// RX front end: the board's receive set-ups for C4FM (bench: which gives the cleanest symbols on a weak signal)
-static const int16_t v_rxfe[] = { 0, 1, 2, 3 };
-static const char *const n_rxfe[] = { TRN("DMR"), TRN("DMR wide"), TRN("FM wide"), TRN("FM narrow") };
+// Menu > C4FM > Advanced: the transmit knobs. The receiver has none: the DMR front end, soft decisions, the equalizer
+// and the tone filter are what worked through a repeater (c4fm.md 4)
 static const set_item_t s_c4fm_adv[] = {
-	LIST(TRN("RX front end"), "C4FM receiver RF set-up bandwidth sensitivity debug", UI_SET_C4FM_RXFE, v_rxfe, n_rxfe),
-	LIST(TRN("Decoder"), "C4FM receiver demodulator soft hard decisions debug", UI_SET_C4FM_DECODER, v_decoder, n_decoder),
 	NUMBER(TRN("TX deviation"), "C4FM modulation level", UI_SET_C4FM_TX_LEVEL, 70, 130, 5, "%"),
 	NUMBER(TRN("Preamble"), "C4FM lead-in", UI_SET_C4FM_PREAMBLE, 100, 500, 100, " ms"),
 	TOGGLE(TRN("Send as FT-70D"), "C4FM radio ID Wires-X fields", UI_SET_C4FM_FT70D),

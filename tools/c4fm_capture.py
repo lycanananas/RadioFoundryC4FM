@@ -6,8 +6,6 @@ here keys the radio.
 
     c4fm_capture.py monitor [--minutes M] [--out DIR]   log every transmission heard (counters per over) and save the
                                                         receiver's input audio of each (2 s around its start)
-    c4fm_capture.py monitor --rotate-fe 0,1,2,3         the same, switching the receive front end profile after
-                                                        each transmission (an A/B of the set-ups on real traffic)
     c4fm_capture.py grab [--out DIR]                    freeze the ring now and save it
     c4fm_capture.py analyze FILE.json                   the saved capture's figures (levels, DC, frames)
 
@@ -112,11 +110,7 @@ def cmd_monitor(dl, args):
         log.flush()
 
     dl.setting("c4fm_capture", 1)
-    fes = [int(x) for x in args.rotate_fe.split(",")] if args.rotate_fe else []
-    fe_i = 0
-    if fes:
-        dl.setting("c4fm_rxfe", fes[0])
-    say(f"monitor {args.minutes} min, captures in {d}" + (f", rotating RX front end {fes}" if fes else ""))
+    say(f"monitor {args.minutes} min, captures in {d}")
     before, in_over, t0, src, rssi = None, False, 0.0, "", []
     while time.time() < end:
         try:
@@ -140,12 +134,8 @@ def cmd_monitor(dl, args):
                     f"ber fich {100.0 * dd['rx_fich_fec'] / (200 * ok):.2f}%, "
                     f"ber vch {100.0 * dd['rx_vch_errors'] / max(1, 81 * dd['rx_ambe']):.2f}%, "
                     f"losts {dd['dsp_losts']}, flywheels {dd['dsp_flywheels']}, gain {v.get('c4fm.rx_gain')}, "
-                    f"center {v.get('c4fm.rx_center')}, inverted {v.get('c4fm.rx_inverted')}, "
-                    f"rssi {min(rssi) if rssi else '?'}..{max(rssi) if rssi else '?'} dBm"
-                    + (f", rx_fe {fes[fe_i % len(fes)]}" if fes else ""))
-                if fes:
-                    fe_i += 1
-                    dl.setting("c4fm_rxfe", fes[fe_i % len(fes)])
+                    f"center {v.get('c4fm.rx_center')}, inverted {v.get('c4fm.rx_inverted')}, eq {v.get('c4fm.rx_eq', '-')}, tone {v.get('c4fm.rx_tone', '-')}, "
+                    f"rssi {min(rssi) if rssi else '?'}..{max(rssi) if rssi else '?'} dBm")
                 before, src = v, ""
             if not in_over:
                 before = v
@@ -197,7 +187,6 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("monitor")
     m.add_argument("--minutes", type=float, default=30)
-    m.add_argument("--rotate-fe", metavar="LIST", help="receive front end profiles to rotate, e.g. 0,1,2,3")
     sub.add_parser("grab")
     a = sub.add_parser("analyze")
     a.add_argument("file")
@@ -209,11 +198,7 @@ def main():
         with rd.DebugLink(args.port) as dl:
             if dl.view(["c4fm_cap"]).get("cap.n") is None:
                 sys.exit("this firmware has no C4FM capture (flash the current build)")
-            try:
-                {"monitor": cmd_monitor, "grab": cmd_grab}[args.cmd](dl, args)
-            finally:
-                if getattr(args, "rotate_fe", None):
-                    dl.setting("c4fm_rxfe", 0)	# back to the default profile
+            {"monitor": cmd_monitor, "grab": cmd_grab}[args.cmd](dl, args)
     except rd.DebugLinkError as e:
         sys.exit(f"debug link: {e}")
     except KeyboardInterrupt:

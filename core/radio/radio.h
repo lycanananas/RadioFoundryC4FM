@@ -219,7 +219,6 @@ typedef struct {
 	uint8_t phase;		// RC4FM_*
 	uint8_t dgid;		// ours: what we send, and the one we hear (0 = all)
 	char call[RADIO_C4FM_CALL_LEN + 1];	// ours ("" = none set: no transmit)
-	uint8_t decoder;	// the receiver's decoder: 0 soft decisions, 1 hard (c4fm_call.h C4FM_DECODER_*)
 	// The transmission heard (or the last one)
 	char src[RADIO_C4FM_CALL_LEN + 1];
 	char dst[RADIO_C4FM_CALL_LEN + 1];

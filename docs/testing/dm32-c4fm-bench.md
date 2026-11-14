@@ -121,9 +121,7 @@ Through a repeater and Wires-X: check that the network shows the DM-32's callsig
 
 `tools/c4fm_capture.py monitor --minutes 30` logs every transmission heard (callsign, radio ID, frames, bit error
 rates, RSSI) and saves the receiver's input audio around the start of each (`.raw`, int16 8 kHz, plus `.json`).
-`--rotate-fe 0,1,2,3` switches the receive front end profile after each transmission (DMR, DMR wide, FM wide, FM
-narrow; Menu > C4FM > Advanced > RX front end) and logs which one each had: an A/B of the set-ups on the same
-repeater. `tests/host/c4fmReplay FILE.raw [--soft]` runs the radio's receiver on a capture on the host, so receiver changes can
+Each OVER line logs the tone the receiver's tone filter found (`tone`). `tests/host/c4fmReplay FILE.raw [--soft] [--eq 7,5,6] [--tone]` runs the radio's receiver on a capture on the host, so receiver changes can
 be measured on real signals before they are flashed. Nothing in this test transmits.
 
 ## 4. Results
@@ -137,4 +135,7 @@ be measured on real signals before they are flashed. Nothing in this test transm
 | 2026-11-14 | RX DN from an FT-70D, direct, 2-3 m | pass | BER 0.32 %, FICH bad 1.3 %; score 4-5 |
 | 2026-11-14 | Wires-X from the DM-32 to an MMDVM hotspot (YSFGateway) | pass | status, connect and the reply parsed; a Yaesu node not tried yet |
 | 2026-11-14 | RX through a repeater (5 transmissions captured) | poor | BER 5-8 %: noise; no ISI, timing and DC fine; the RX filter register doesn't change it (the audio copy is taken before it). Soft decisions on the captures: FICH 50-60 % -> 90-100 % good, DCH CRC nearly all good |
+| 2026-11-14 | Equalizer on the repeater captures (host replay) | better | voice BER 5.6 % -> 3.5 %, more FICHs decode; residual error is white noise |
+| 2026-11-14 | SR5WI's CTCSS tone under its C4FM (host replay) | found | 127.3 Hz on every repeater capture; the tone filter finds it and voice BER drops to 2.2 % (1.7 % once the tone is known) |
+| 2026-11-14 | RX front end FM wide through the repeater | fail | no sync at all: the RF chip's FM audio is voice filtered (nothing under 300 Hz). The 0.3 % capture earlier was on the DMR profile after a restart |
 | 2026-11-13 | Voice quality, both ways | fair | sounds like an FT-991A rather than an FT5D |

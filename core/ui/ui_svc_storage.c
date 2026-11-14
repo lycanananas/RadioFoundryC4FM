@@ -315,15 +315,9 @@ int32_t ui_svc_setting_get(uint8_t id)
 		return (st.c4fm_flags & SETTINGS_C4FM_PLAIN) == 0;
 	case UI_SET_C4FM_TEST_TONE:
 		return ambeVoiceTestSignal();
-	case UI_SET_C4FM_RXFE:
-		settings_read(&st);
-		return (st.c4fm_flags & SETTINGS_C4FM_RXFE_MASK) >> SETTINGS_C4FM_RXFE_SHIFT;
 	case UI_SET_WX_ROOM:
 		settings_read(&st);
 		return st.wx_room <= 99999u ? (int32_t)st.wx_room : 0;
-	case UI_SET_C4FM_DECODER:
-		settings_read(&st);
-		return (st.c4fm_flags & SETTINGS_C4FM_DECODER_MASK) >> SETTINGS_C4FM_DECODER_SHIFT;
 #endif
 	case UI_SET_AUTO_OFF_MIN:
 		settings_read(&st);
@@ -526,24 +520,16 @@ bool ui_svc_setting_set(uint8_t id, int32_t value)
 	case UI_SET_C4FM_PREAMBLE:
 	case UI_SET_VOICE_RX_GAIN:
 	case UI_SET_C4FM_FT70D:
-	case UI_SET_C4FM_DECODER:
-	case UI_SET_C4FM_RXFE:
 		st = settings_begin();
-		if (id == UI_SET_C4FM_RXFE) {
-			st->c4fm_flags = (uint8_t)((st->c4fm_flags & ~SETTINGS_C4FM_RXFE_MASK) |
-						   ((clamp16(value, 0, 3) << SETTINGS_C4FM_RXFE_SHIFT) & SETTINGS_C4FM_RXFE_MASK));
-		} else if (id == UI_SET_C4FM_DECODER) {
-			st->c4fm_flags = (uint8_t)((st->c4fm_flags & ~SETTINGS_C4FM_DECODER_MASK) |
-						   ((clamp16(value, 0, 3) << SETTINGS_C4FM_DECODER_SHIFT) & SETTINGS_C4FM_DECODER_MASK));
-		} else if (id == UI_SET_C4FM_TX_LEVEL) {
+		if (id == UI_SET_C4FM_TX_LEVEL) {
 			st->c4fm_tx_level = (uint8_t)clamp16(value, 70, 130);
 		} else if (id == UI_SET_C4FM_PREAMBLE) {
 			st->c4fm_preamble = (uint8_t)(clamp16(value, 100, 500) / 100);
 		} else if (id == UI_SET_VOICE_RX_GAIN) {
 			st->voice_rx_gain = (int8_t)(clamp16(value, -6, 12) & ~1);
 		} else {
-			st->c4fm_flags = (uint8_t)(value ? (st->c4fm_flags & ~SETTINGS_C4FM_PLAIN)
-						: (st->c4fm_flags | SETTINGS_C4FM_PLAIN));
+			// Send as FT-70D; the unused bits go back to 0
+			st->c4fm_flags = (uint8_t)(value ? 0 : SETTINGS_C4FM_PLAIN);
 		}
 		settings_end(hal_millis());
 		radio_req_reload();	// the radio core applies them on reload (radio_sm apply_prefs)
