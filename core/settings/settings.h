@@ -233,6 +233,13 @@ typedef struct {
 	uint8_t vfo2_sfr;		// the second
 	// C4FM (docs/spec/c4fm.md): the DG-ID we send and hear, 0-99, 0 = all (was reserved9: an older record reads 0)
 	uint8_t c4fm_dgid;
+	// C4FM transmit and the digital voice (Settings > C4FM; appended: an older record reads 0, the defaults)
+	uint8_t c4fm_tx_level;		// TX deviation, percent of the nominal +-2700 Hz (70-130), 0 = 100
+	uint8_t c4fm_preamble;		// preamble before the header, 100 ms units (1-5), 0 = 1
+	int8_t voice_rx_gain;		// decoded voice, C4FM and DMR: dB, -6..+12 in 2 dB steps
+	uint8_t c4fm_flags;		// SETTINGS_C4FM_* bits
+	// The C4FM callsign (Settings via C4FM > Callsign), upper case, NUL padded; "" = the radio name's first word
+	char c4fm_call[12];
 } settings_t;
 
 // Pages: settings_t is stored as records of SETTINGS_PAGE_BYTES each (settings-store.md 2.1). Only the pages its size
@@ -245,7 +252,11 @@ typedef struct {
 // cp_flags: the owner kept another firmware's codeplug as the radio's own ("Use anyway", docs/spec/codeplug-native.md
 // 2); app.c keeps it equal to codeplug_acceptance(), which a codeplug written by a CPS or TFTP drops
 #define SETTINGS_CP_ACCEPTED		0x01u
-#define SETTINGS_CP_RX_EXT		0x02u	// receive past the band table is on (not about the codeplug: the free bit here)
+#define SETTINGS_CP_RX_EXT		0x02u
+// c4fm_flags
+#define SETTINGS_C4FM_PLAIN		0x01u	// plain fields (destination ALL, CM 0) instead of an FT-70D's
+#define SETTINGS_C4FM_DECODER_SHIFT	1	// bits 1-2: the decoder (c4fm_call.h C4FM_DECODER_*), 0 = soft decisions
+#define SETTINGS_C4FM_DECODER_MASK	0x06u	// receive past the band table is on (not about the codeplug: the free bit here)
 
 #define SETTINGS_ZONE_JRN_NONE		0u	// zone_jrn_kind
 #define SETTINGS_ZONE_JRN_ADD		1u

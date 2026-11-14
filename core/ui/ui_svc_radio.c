@@ -64,6 +64,27 @@ static void rs_send(const radio_settings_t *was)
 	}
 }
 
+#if CONFIG_C4FM
+// The mode menus' FM rows kept in the radio core's settings (ui_modes.c): busy lockout and roger beep
+int32_t ui_svc_fm_get(uint8_t id)
+{
+	const radio_settings_t *s = rs_copy();
+	return id == UI_SET_FM_BCL ? s->bcl : s->roger_beep;
+}
+
+void ui_svc_fm_set(uint8_t id, int32_t value)
+{
+	radio_settings_t was = *rs_copy();
+	if (id == UI_SET_FM_BCL) {
+		rs.bcl = (uint8_t)(value < RADIO_BCL_OFF ? RADIO_BCL_OFF : value > RADIO_BCL_WRONG_TONE ? RADIO_BCL_WRONG_TONE
+				   : value);
+	} else {
+		rs.roger_beep = value != 0;
+	}
+	rs_send(&was);
+}
+#endif
+
 #if CONFIG_FM
 // FM monitor latch: the squelch held open until off (a press of the MONITOR key ends it too)
 bool ui_svc_monitor(bool on)

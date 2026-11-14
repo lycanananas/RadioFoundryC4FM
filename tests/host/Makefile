@@ -137,6 +137,10 @@ c4fmYsfTest: c4fmYsfTest.c c4fmOracle.h $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
 	$(CC) $(CFLAGS) -o $@ c4fmYsfTest.c $(C4FMLIB)
 c4fmDspTest: c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
 	$(CC) $(CFLAGS) -o $@ c4fmDspTest.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
+# The receiver on a bench capture (tools/c4fm_capture.py), for the bench: a helper, not a test
+TESTS   += c4fmReplay
+c4fmReplay: c4fmReplay.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
+	$(CC) $(CFLAGS) -o $@ c4fmReplay.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
 c4fmCallTest: c4fmCallTest.c $(CORE)/c4fm/c4fm_call.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB) $(wildcard $(CORE)/c4fm/*.h)
 	$(CC) $(CFLAGS) -I$(ROOT)/hal -o $@ c4fmCallTest.c $(CORE)/c4fm/c4fm_call.c $(CORE)/c4fm/c4fm_dsp.c $(C4FMLIB)
 
@@ -359,6 +363,10 @@ run-core: radioCoreTest radioCoreTestNoVfoDmr radioCoreTestAprs radioCoreTestApr
 FLASH_HAL := -I$(ROOT)/hal -Wshadow
 TESTS   += codeplugTest
 
+# The same with C4FM channels (the C4FM fork's mode byte 2, docs/spec/c4fm.md 6)
+TESTS   += codeplugTestC4fm
+codeplugTestC4fm: codeplugTest.c $(CORE)/codeplug/codeplug.c $(CORE)/codeplug/codeplug.h $(CORE)/codeplug/dmr_iddb.c $(CORE)/storage/storage.c
+	$(CC) $(CFLAGS) $(FLASH_HAL) -DCONFIG_C4FM=1 -o $@ codeplugTest.c $(CORE)/codeplug/codeplug.c $(CORE)/codeplug/dmr_iddb.c $(CORE)/storage/storage.c -lm
 codeplugTest: codeplugTest.c $(CORE)/codeplug/codeplug.c $(CORE)/codeplug/codeplug.h $(CORE)/codeplug/dmr_iddb.c $(CORE)/codeplug/dmr_iddb.h $(CORE)/storage/storage.c
 	$(CC) $(CFLAGS) $(FLASH_HAL) -o $@ codeplugTest.c $(CORE)/codeplug/codeplug.c $(CORE)/codeplug/dmr_iddb.c $(CORE)/storage/storage.c -lm
 
@@ -381,11 +389,12 @@ calCurveTest: calCurveTest.c $(CORE)/radio/cal_curve.h
 	$(CC) $(CFLAGS) -Wshadow -o $@ calCurveTest.c
 
 run: run-flash
-run-flash: codeplugTest codeplugNoCompactTest calCurveTest codeplugPower2Test codeplugPower3Test codeplugPower9Test
+run-flash: codeplugTest codeplugTestC4fm codeplugNoCompactTest calCurveTest codeplugPower2Test codeplugPower3Test codeplugPower9Test
 	./codeplugPower2Test
 	./codeplugPower3Test
 	./codeplugPower9Test
 	./codeplugTest
+	./codeplugTestC4fm
 	./codeplugNoCompactTest
 	./calCurveTest
 .PHONY: run-flash
@@ -538,6 +547,12 @@ uiFlowTestNoColor: uiFlowTest.c $(UIDEPS)
 uiSim: uiSim.c $(UIDEPS)
 	$(CC) $(UIFLAGS) -o $@ uiSim.c $(UIAPP) -lz
 
+# The C4FM build's menus (docs/spec/c4fm.md 6): the simulator built with CONFIG_C4FM opens every mode page and screen
+# at each display class (a screen never drawn in a test can crash the radio); run by c4fmUiSmoke.sh
+TESTS   += uiSimC4fm
+uiSimC4fm: uiSim.c $(UIDEPS) $(CORE)/ui/ui_modes.c
+	$(CC) $(UIFLAGS) -DCONFIG_C4FM=1 -o $@ uiSim.c $(UIAPP) $(CORE)/ui/ui_modes.c -lz
+
 # The beep reel (tools/beep_reel.py). BEEP_DIR picks the beep.c and beep.h to build with, so CI can build the base
 # commit's beeps for a before and after comparison. We copy that beep.h into out/beep/radio/ and put out/beep first on
 # the include path, so beep.c and beepReel.c both use it instead of core/radio/beep.h, and beep_names.awk makes the
@@ -572,7 +587,7 @@ ui-sheets: uiSim
 	UI_GALLERY_COLORS="$(UI_GALLERY_COLORS)" ./uiSim --sheets out/sheets $(GEOM)
 
 run: run-ui
-run-ui: gfxTest gfxTestZh i18nTest i18nTestNoLang i18nTestDefault uiFlowTest uiFlowTestNoColor uiSim beepReel
+run-ui: gfxTest gfxTestZh i18nTest i18nTestNoLang i18nTestDefault uiFlowTest uiFlowTestNoColor uiSim uiSimC4fm beepReel
 	./gfxTest
 	./gfxTestZh
 	./i18nTest
@@ -581,6 +596,7 @@ run-ui: gfxTest gfxTestZh i18nTest i18nTestNoLang i18nTestDefault uiFlowTest uiF
 	./uiFlowTest
 	./uiFlowTestNoColor
 	./uiSim --layout
+	./c4fmUiSmoke.sh
 	./beepReel --out out/beep-reel --no-frames > /dev/null	# checks every beep has a scene and the scenes still run
 .PHONY: run-ui ui-gallery ui-sheets
 
@@ -1425,7 +1441,7 @@ run-boards::
 # Every test in TESTS must be run by a group: run: $(TESTS) above expands before the later TESTS += lines, so a test
 # missing from its group's run lines is built by no rule and run by none (two were, unnoticed). HELPERS are programs
 # a test script drives, not tests of their own
-HELPERS := pppPeer cpsSim snmpPeer
+HELPERS := pppPeer cpsSim snmpPeer uiSimC4fm c4fmReplay
 run: check-run
 check-run:
 	@for t in $(filter-out $(HELPERS),$(TESTS)); do \

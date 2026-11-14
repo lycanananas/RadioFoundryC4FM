@@ -350,7 +350,25 @@ typedef enum {
 	// docs/spec/codeplug-settings.md), which the radio core takes when codeplug_kv_serial() moves on
 	UI_SET_ARS_SERVER,
 	UI_SET_IP_GATEWAY,
-	UI_SET_C4FM_DGID,	// C4FM: the DG-ID we send and hear, 0-99, 0 = all (Settings > My radio, CONFIG_C4FM; settings_t.c4fm_dgid)
+	UI_SET_C4FM_DGID,	// C4FM: the DG-ID we send and hear, 0-99, 0 = all (Settings > C4FM, CONFIG_C4FM; settings_t.c4fm_dgid)
+	// Settings > C4FM (CONFIG_C4FM; settings_t, docs/spec/c4fm.md 6): TX deviation 70-130 %, preamble 100-500 ms, the
+	// decoded voice's level -6..+12 dB (also DMR), an FT-70D's fields 1 / plain 0, and the test tone (RAM only:
+	// ambeVoiceSetTestSignal, the encoder gets a tone instead of the mic)
+	UI_SET_C4FM_TX_LEVEL,
+	UI_SET_C4FM_PREAMBLE,
+	UI_SET_VOICE_RX_GAIN,
+	UI_SET_C4FM_FT70D,
+	UI_SET_C4FM_TEST_TONE,
+	UI_SET_C4FM_DECODER,	// Menu > C4FM > Advanced > Demodulator: C4FM_DECODER_* (settings_t.c4fm_flags bits 1-2)
+	// The mode menus (CONFIG_C4FM; ui_modes.c): FM's busy lockout (radio_bcl_t) and roger beep (radio_settings_t), and
+	// the channel or VFO in use: bandwidth 25 kHz 1 / 12.5 kHz 0, RX / TX tone as a tones_picker index, the VFO's
+	// repeater offset in kHz (0 simplex; the VFO only)
+	UI_SET_FM_BCL,
+	UI_SET_FM_ROGER,
+	UI_SET_CH_WIDE,
+	UI_SET_CH_RX_TONE,
+	UI_SET_CH_TX_TONE,
+	UI_SET_VFO_OFFSET,
 	UI_SET_COUNT
 } ui_setting_t;
 
@@ -360,6 +378,16 @@ enum {
 	UI_ACCENT_PURPLE, UI_ACCENT_PINK, UI_ACCENT_COUNT
 };
 int32_t ui_svc_setting_get(uint8_t id);
+#if CONFIG_C4FM
+// The mode menus (ui_modes.c): the ids UI_SET_FM_BCL .. UI_SET_VFO_OFFSET; FM's two are the radio core's settings
+int32_t ui_modes_setting_get(uint8_t id);
+bool ui_modes_setting_set(uint8_t id, int32_t value);
+int32_t ui_svc_fm_get(uint8_t id);
+void ui_svc_fm_set(uint8_t id, int32_t value);
+// The C4FM callsign setting (settings_t.c4fm_call; "" = the radio name's first word)
+void ui_svc_c4fm_call_get(char *out, uint8_t len);
+void ui_svc_c4fm_call_set(const char *call);
+#endif
 bool ui_svc_setting_set(uint8_t id, int32_t value);
 // The RAM table behind the stub (defaults until set): for the settings no package stores
 int32_t ui_svc_ram_get(uint8_t id);

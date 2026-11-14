@@ -29,7 +29,7 @@ typedef struct {
 	uint8_t power;		// board power level index, or CODEPLUG_POWER_DEFAULT
 	bool rx_only;
 	// DMR (unused by FM)
-	uint8_t color_code;
+	uint8_t color_code;	// DMR 0-15; on a C4FM channel the DG-ID, 0-99 (CONFIG_C4FM)
 	uint8_t timeslot;	// 1 or 2
 	uint16_t contact;	// talk target contact index, 0 = none
 	uint16_t listen_list;	// RX group list index, 0 = none

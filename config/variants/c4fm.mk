@@ -1,22 +1,17 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 The RadioFoundry Authors
 ## title: C4FM
-## summary: The C4FM proof of concept: one VFO in FM or C4FM (Yaesu System Fusion DN), callsign and DG-ID.
+## summary: FM, DMR and C4FM (Yaesu System Fusion DN) in one firmware; DMR voice and SMS, no IP or network services.
 ##
-## make BOARD=<board> VARIANT=c4fm. The GPL fork's build (docs/spec/c4fm.md): C4FM on, and what a C4FM / FM radio
-## doesn't need off, which also frees the RAM C4FM takes. DMR itself stays built: C4FM shares its AMBE+2 codec, the
-## voice path and the modem glue; DMR channels and the DMR VFO are just not offered.
+## make BOARD=<board> VARIANT=c4fm. The GPL fork's build (docs/spec/c4fm.md): C4FM on beside FM and DMR (voice,
+## channels, contacts, SMS), and off what a radio for QSOs doesn't need (IP, the cable's network services, the hotspot,
+## the advanced DMR services), which also frees the RAM C4FM takes.
 
 CONFIG_C4FM ?= y
 
-# The VFO in FM or C4FM; no DMR in it
-CONFIG_VFO_DMR ?= n
-
-# DMR services C4FM has no use for
+# The advanced DMR services (SMS stays)
 CONFIG_DMR_PRIVACY ?= n
-CONFIG_DMR_TALKER_ALIAS ?= n
 CONFIG_DMR_GPS ?= n
-CONFIG_DMR_SMS ?= n
 CONFIG_DMR_ARS ?= n
 CONFIG_DMR_LRRP ?= n
 CONFIG_DMR_SIGNALING ?= n
@@ -26,7 +21,6 @@ CONFIG_DMR_IP_GATEWAY ?= n
 CONFIG_DMR_CONTROL_STATION ?= n
 CONFIG_ZONE_SHARE ?= n
 CONFIG_SFR ?= n
-CONFIG_IDDB_COMPACT ?= n
 
 # The hotspot and the network services on the programming cable
 CONFIG_HOTSPOT ?= n

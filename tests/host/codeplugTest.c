@@ -1021,6 +1021,38 @@ static void test_channel_names(void)
 	CHECK(codeplug_zone_name(0, name) && strcmp(name, "All channels") == 0 && !codeplug_zone_name(1, name));
 }
 
+#if CONFIG_C4FM
+// The C4FM fork's channels (docs/spec/c4fm.md 6): mode byte 2, the DG-ID (0-99) in the color code byte; DMR's and
+// FM's records as before
+static void test_c4fm_channels(void)
+{
+	uint8_t rec[CODEPLUG_OPENFW_CHANNEL_SIZE];
+	memset(rec, 0, sizeof rec);
+	channel_t ch, back;
+	memset(&ch, 0, sizeof ch);
+	strcpy(ch.name, "SR5WI");
+	ch.rx_hz = 438900000;
+	ch.tx_hz = 431300000;
+	ch.mode = RADIO_MODE_C4FM;
+	ch.color_code = 42;
+	ch.power = CODEPLUG_POWER_DEFAULT;
+	codeplug_openfw_encode(&ch, rec);
+	CHECK(rec[0x18] == 2 && rec[0x2C] == 42);
+	CHECK(codeplug_openfw_decode(rec, &back));
+	CHECK(back.mode == RADIO_MODE_C4FM && back.color_code == 42 && back.tx_hz == 431300000);
+	// A DMR channel keeps its 4-bit color code
+	ch.mode = RADIO_MODE_DMR;
+	ch.color_code = 7;
+	codeplug_openfw_encode(&ch, rec);
+	CHECK(rec[0x18] == 1 && rec[0x2C] == 7);
+	CHECK(codeplug_openfw_decode(rec, &back) && back.mode == RADIO_MODE_DMR && back.color_code == 7);
+	// A stray DG-ID over 99 reads as 0
+	rec[0x18] = 2;
+	rec[0x2C] = 200;
+	CHECK(codeplug_openfw_decode(rec, &back) && back.mode == RADIO_MODE_C4FM && back.color_code == 0);
+}
+#endif
+
 int main(void)
 {
 	image = malloc(IMAGE_SIZE);
@@ -1039,6 +1071,9 @@ int main(void)
 	test_erased();
 	test_foreign();
 	test_no_flash();
+#if CONFIG_C4FM
+	test_c4fm_channels();
+#endif
 	free(image);
 	printf(failures ? "# codeplugTest FAILED (%d)\n" : "# codeplugTest PASSED\n", failures);
 	return failures ? 1 : 0;

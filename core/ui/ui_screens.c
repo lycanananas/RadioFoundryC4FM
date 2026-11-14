@@ -287,7 +287,7 @@ static void draw_talk_c4fm(const radio_view_t *v)
 		sb_str(&b, TR("C4FM: no modem"));
 		col = ui_col.warn;
 	} else if (c->call[0] == '\0') {
-		sb_str(&b, TR("Set a callsign: radio name"));
+		sb_str(&b, TR("Set a callsign: Menu > C4FM"));
 		col = ui_col.warn;
 	} else if (v->ch.rx_only) {
 		sb_str(&b, TR("RX only"));
@@ -1229,7 +1229,9 @@ static const char *deny_reason(const radio_view_t *v, char *buf, size_t len)
 	case TXDENY_NO_REPEATER: sb_str(&b, TR("No repeater answered")); break;
 	case TXDENY_REJECTED: sb_str(&b, TR("Modem refused to send")); break;
 	case TXDENY_HOTSPOT: sb_str(&b, TR("Hotspot mode: PTT off")); break;
-	case TXDENY_NO_ID: sb_str(&b, TR("No DMR ID in codeplug")); break;
+	case TXDENY_NO_ID:
+		sb_str(&b, CONFIG_C4FM && v->ch.mode == RADIO_MODE_C4FM ? TR("No C4FM callsign") : TR("No DMR ID in codeplug"));
+		break;
 	case TXDENY_AM: sb_str(&b, TR("Air band: receive only")); break;
 	case TXDENY_BCAST: sb_str(&b, TR("Broadcast: receive only")); break;
 	case TXDENY_SFR_RPT: sb_str(&b, TR("Repeater channel: PTT off")); break;
@@ -1251,7 +1253,8 @@ static const char *deny_action(const radio_view_t *v)
 	case TXDENY_REJECTED:
 	case TXDENY_NO_DMR: return TR("Release PTT, try again");
 	case TXDENY_HOTSPOT: return TR("OK stop hotspot");
-	case TXDENY_NO_ID: return TR("Set your DMR ID in qdmr");
+	case TXDENY_NO_ID:
+		return CONFIG_C4FM && v->ch.mode == RADIO_MODE_C4FM ? TR("Set it in Menu > C4FM") : TR("Set your DMR ID in qdmr");
 	case TXDENY_AM:
 	case TXDENY_BCAST: return v->vfo ? TR("Tune out of the band") : TR("Pick another channel");
 	case TXDENY_SFR_RPT: return TR("Pick a user channel to talk");
@@ -1763,6 +1766,10 @@ static void draw_activity(const radio_view_t *v, const ui_state_t *s)
 			// Who is talking, in which DG-ID and mode (a transmission not played says why)
 			sb_init(&b, buf, sizeof buf);
 			sb_str(&b, v->c4fm.src[0] != '\0' ? v->c4fm.src : TR("C4FM"));
+			if (v->c4fm.src_id[0] != '\0') {	// the caller's radio ID, as a Yaesu radio shows it
+				sb_chr(&b, ' ');
+				sb_str(&b, v->c4fm.src_id);
+			}
 			sb_chr(&b, ' ');
 			sb_str(&b, c4fm_dt_word(v->c4fm.rx_dt));
 			if (v->c4fm.phase == RC4FM_RX_BUSY && v->c4fm.rx_dt == 2) {

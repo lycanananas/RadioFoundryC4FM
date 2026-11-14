@@ -648,13 +648,15 @@ bool codeplug_openfw_decode(const uint8_t *r, channel_t *out)
 		return false;
 	}
 	copy_name(out->name, &r[CH_NAME], CODEPLUG_NAME_LEN);
-	out->mode = r[CH_MODE] == 1 ? RADIO_MODE_DMR : RADIO_MODE_FM;
+	// Mode byte: 0 FM, 1 DMR, 2 C4FM (the C4FM fork's; a build without C4FM reads it as FM)
+	out->mode = r[CH_MODE] == 1 ? RADIO_MODE_DMR : (CONFIG_C4FM && r[CH_MODE] == 2) ? RADIO_MODE_C4FM : RADIO_MODE_FM;
 	out->bw = (r[CH_FLAG4] & FLAG4_25K) ? RADIO_BW_25K : RADIO_BW_12K5;
 	out->rx_tone = tone(le16(&r[CH_RX_TONE]));
 	out->tx_tone = tone(le16(&r[CH_TX_TONE]));
 	out->power = r[CH_POWER] == 0 ? CODEPLUG_POWER_DEFAULT : power_from_byte(r[CH_POWER]);
 	out->rx_only = (r[CH_FLAG4] & FLAG4_RX_ONLY) != 0;
-	out->color_code = r[CH_CC] & 0x0Fu;
+	// A C4FM channel keeps its DG-ID (0-99) in the color code byte
+	out->color_code = out->mode == RADIO_MODE_C4FM ? (r[CH_CC] <= 99u ? r[CH_CC] : 0u) : (r[CH_CC] & 0x0Fu);
 	out->timeslot = (r[CH_FLAG2] & FLAG2_TS2) ? 2 : 1;
 	out->contact = le16(&r[CH_CONTACT]);
 	out->listen_list = r[CH_RX_GROUP];
@@ -700,7 +702,7 @@ void codeplug_openfw_encode(const channel_t *ch, uint8_t *r)
 	put_name(&r[CH_NAME], ch->name, CODEPLUG_NAME_LEN);
 	put_freq(&r[CH_RX], ch->rx_hz);
 	put_freq(&r[CH_TX], ch->tx_hz);
-	r[CH_MODE] = ch->mode == RADIO_MODE_DMR ? 1 : 0;
+	r[CH_MODE] = ch->mode == RADIO_MODE_DMR ? 1 : (CONFIG_C4FM && ch->mode == RADIO_MODE_C4FM) ? 2 : 0;
 	r[CH_POWER] = ch->power == CODEPLUG_POWER_DEFAULT ? 0 : power_to_byte(ch->power);
 	put16(&r[CH_RX_TONE], tone_word(&ch->rx_tone));
 	put16(&r[CH_TX_TONE], tone_word(&ch->tx_tone));
@@ -708,7 +710,8 @@ void codeplug_openfw_encode(const channel_t *ch, uint8_t *r)
 				(ch->vox ? FLAG4_VOX : 0) | (ch->scan_skip ? FLAG4_ZONE_SKIP : 0) |
 				(ch->rx_only ? FLAG4_RX_ONLY : 0) | (ch->bw == RADIO_BW_25K ? FLAG4_25K : 0));
 	r[CH_FLAG2] = (uint8_t)((r[CH_FLAG2] & ~FLAG2_TS2) | (ch->timeslot == 2 ? FLAG2_TS2 : 0));
-	r[CH_CC] = ch->color_code & 0x0Fu;
+	r[CH_CC] = CONFIG_C4FM && ch->mode == RADIO_MODE_C4FM ? (uint8_t)(ch->color_code <= 99u ? ch->color_code : 0u)
+								    : (uint8_t)(ch->color_code & 0x0Fu);
 	put16(&r[CH_CONTACT], ch->contact);
 	r[CH_RX_GROUP] = (uint8_t)(ch->listen_list <= 0xFFu ? ch->listen_list : 0);
 	r[CH_LFLAG1] = (uint8_t)((r[CH_LFLAG1] & ~(LFLAG1_ID | LFLAG1_NO_BEEP | LFLAG1_NO_ECO | LFLAG1_DMO)) |

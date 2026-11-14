@@ -196,6 +196,7 @@ typedef struct {
 	// The transmission heard (or the last one)
 	char src[RADIO_C4FM_CALL_LEN + 1];
 	char dst[RADIO_C4FM_CALL_LEN + 1];
+	char src_id[6];		// the caller's radio ID (five of 0-9 A-Z), "" unknown
 	uint8_t rx_dgid;
 	uint8_t rx_dt;		// YSF data type: 0 V/D 1, 1 data, 2 DN (V/D 2), 3 VW (voice full rate)
 	bool late_entry;

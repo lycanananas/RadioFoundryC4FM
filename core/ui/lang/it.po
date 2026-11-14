@@ -20,7 +20,7 @@ msgstr "Loader PC collegato"
 msgid "Power-cycle to exit"
 msgstr "Riavvia per uscire"
 
-#: core/ui/fmt.c core/ui/ui_aprs.c core/ui/ui_menus.c core/ui/ui_screens.c
+#: core/ui/fmt.c core/ui/ui_aprs.c core/ui/ui_menus.c core/ui/ui_modes.c core/ui/ui_screens.c
 msgid "Off"
 msgstr "No"
 
@@ -1121,12 +1121,32 @@ msgid "Up Down page  Back"
 msgstr "Su Giù pagina  Indietro"
 
 #: core/ui/ui_menus.c
-msgid "Last caller"
-msgstr "Ultimo chiamante"
-
-#: core/ui/ui_menus.c
 msgid "Zones"
 msgstr "Zone"
+
+#: core/ui/ui_menus.c
+msgid "FM"
+msgstr "FM"
+
+#: core/ui/ui_menus.c
+msgid "DMR"
+msgstr "DMR"
+
+#: core/ui/ui_menus.c core/ui/ui_screens.c
+msgid "C4FM"
+msgstr "C4FM"
+
+#: core/ui/ui_menus.c
+msgid "Switch to Memory"
+msgstr "Passa a memoria"
+
+#: core/ui/ui_menus.c
+msgid "Switch to VFO"
+msgstr "Passa a VFO"
+
+#: core/ui/ui_menus.c
+msgid "in use"
+msgstr "in uso"
 
 #: core/ui/ui_menus.c
 msgid " new"
@@ -1139,6 +1159,10 @@ msgstr "Scansione"
 #: core/ui/ui_menus.c
 msgid "Channels: not in this build"
 msgstr "Canali: non in questa build"
+
+#: core/ui/ui_menus.c
+msgid "Last caller"
+msgstr "Ultimo chiamante"
 
 #: core/ui/ui_menus.c
 msgid "1-7 open  Back"
@@ -3041,6 +3065,74 @@ msgid "DMR ID and name"
 msgstr "ID DMR e nome"
 
 #: core/ui/ui_menus.c
+msgid "Carrier"
+msgstr "Portante"
+
+#: core/ui/ui_menus.c
+msgid "Wrong tone"
+msgstr "Tono errato"
+
+#: core/ui/ui_menus.c
+msgid "Busy lockout"
+msgstr "Blocco occupato"
+
+#: core/ui/ui_menus.c
+msgid "Roger beep"
+msgstr "Roger beep"
+
+#: core/ui/ui_menus.c
+msgid "Wide 25 kHz"
+msgstr "Larga 25 kHz"
+
+#: core/ui/ui_menus.c
+msgid "RX tone"
+msgstr "Tono RX"
+
+#: core/ui/ui_menus.c
+msgid "TX tone"
+msgstr "Tono TX"
+
+#: core/ui/ui_menus.c
+msgid "Repeater offset"
+msgstr "Shift ripetitore"
+
+#: core/ui/ui_menus.c
+msgid "Data and messages"
+msgstr "Dati e messaggi"
+
+#: core/ui/ui_menus.c
+msgid "Last heard"
+msgstr "Ultimi sentiti"
+
+#: core/ui/ui_menus.c
+msgid "DG-ID"
+msgstr "DG-ID"
+
+#: core/ui/ui_menus.c
+msgid "Advanced"
+msgstr "Avanzate"
+
+#: core/ui/ui_menus.c
+msgid "TX deviation"
+msgstr "Deviazione TX"
+
+#: core/ui/ui_menus.c
+msgid "Preamble"
+msgstr "Preambolo"
+
+#: core/ui/ui_menus.c
+msgid "Send as FT-70D"
+msgstr "Invia come FT-70D"
+
+#: core/ui/ui_menus.c
+msgid "Test tone"
+msgstr "Tono di prova"
+
+#: core/ui/ui_menus.c
+msgid "Voice volume"
+msgstr "Volume voce"
+
+#: core/ui/ui_menus.c
 msgid "Factory reset"
 msgstr "Ripristino fabbrica"
 
@@ -3073,6 +3165,10 @@ msgid "Talk & Listen"
 msgstr "Parla e ascolta"
 
 #: core/ui/ui_menus.c
+msgid "Digital voice"
+msgstr "Voce digitale"
+
+#: core/ui/ui_menus.c
 msgid "Privacy"
 msgstr "Privacy"
 
@@ -3101,12 +3197,28 @@ msgid "My radio"
 msgstr "Mia radio"
 
 #: core/ui/ui_menus.c
-msgid "Advanced"
-msgstr "Avanzate"
+msgid "C4FM advanced"
+msgstr "C4FM avanzate"
+
+#: core/ui/ui_menus.c
+msgid "C4FM Advanced"
+msgstr "C4FM avanzate"
+
+#: core/ui/ui_menus.c
+msgid "DMR data"
+msgstr "Dati DMR"
+
+#: core/ui/ui_menus.c
+msgid "DMR Data"
+msgstr "Dati DMR"
 
 #: core/ui/ui_menus.c
 msgid "0-9 open  Back"
 msgstr "0-9 apri  Indietro"
+
+#: core/ui/ui_menus.c
+msgid "Simplex"
+msgstr "Simplex"
 
 #: core/ui/ui_menus.c
 msgid "Talk permit tone: not in this build"
@@ -3159,6 +3271,14 @@ msgstr "Niente GPS su questa radio"
 #: core/ui/ui_menus.c
 msgid "DMR position: not in this build"
 msgstr "Posizione DMR: non in questa build"
+
+#: core/ui/ui_menus.c
+msgid "FM only: Quick > Mode"
+msgstr "Solo FM: Rapido > Modo"
+
+#: core/ui/ui_menus.c
+msgid "VFO only: a channel's offset is in the codeplug"
+msgstr "Solo VFO: quello del canale è nel codeplug"
 
 #: core/ui/ui_menus.c
 msgid "Diagnostics: not in this build"
@@ -3300,6 +3420,14 @@ msgstr "Codeplug di un altro firmware? Crea nuovo cancella contatti, nominativo 
 msgid "Old codeplug"
 msgstr "Codeplug precedente"
 
+#: core/ui/ui_menus.c
+msgid "Radio ID "
+msgstr "ID radio "
+
+#: core/ui/ui_menus.c
+msgid "No C4FM station heard yet"
+msgstr "Nessuna stazione C4FM sentita"
+
 #: core/ui/ui_position.c
 msgid "Latitude"
 msgstr "Latitudine"
@@ -3311,6 +3439,26 @@ msgstr "Longitudine"
 #: core/ui/ui_position.c
 msgid "Up to 90 N/S, 180 E/W"
 msgstr "Fino a 90 N/S, 180 E/O"
+
+#: core/ui/ui_screens.c
+msgid "C4FM: no modem"
+msgstr "C4FM: nessun modem"
+
+#: core/ui/ui_screens.c
+msgid "Set a callsign: radio name"
+msgstr "Imposta nominativo: nome"
+
+#: core/ui/ui_screens.c
+msgid "VW: not played"
+msgstr "VW: non riprodotto"
+
+#: core/ui/ui_screens.c
+msgid "V/D 1: not played"
+msgstr "V/D 1: non riprodotto"
+
+#: core/ui/ui_screens.c
+msgid "data"
+msgstr "dati"
 
 #: core/ui/ui_screens.c
 msgid "IDLE"
@@ -3577,6 +3725,10 @@ msgid "MON: digital monitor"
 msgstr "MON: monitor digitale"
 
 #: core/ui/ui_screens.c
+msgid ", other DG-ID"
+msgstr ", altro DG-ID"
+
+#: core/ui/ui_screens.c
 msgid "Squelch open"
 msgstr "Squelch aperto"
 
@@ -3603,6 +3755,10 @@ msgstr "Non puoi trasmettere"
 #: core/ui/ui_screens.c
 msgid "Transmit waits for it"
 msgstr "Niente TX fino ad allora"
+
+#: core/ui/ui_screens.c
+msgid "Last heard "
+msgstr "Ultimo sentito "
 
 #: core/ui/ui_screens.c
 msgid "Last activity "

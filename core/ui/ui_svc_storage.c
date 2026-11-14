@@ -25,6 +25,9 @@
 #include "radio/radio_keys.h"
 #include "hal_time.h"
 #include "config.h"
+#if CONFIG_C4FM
+#include "dmr/ambe/ambeVoice.h"
+#endif
 #if CONFIG_HOSTLINK
 #include "hostlink/hostlink.h"
 #endif
@@ -126,8 +129,36 @@ static uint16_t data_row_key(uint8_t id)
 static bool data_id_post(uint16_t key, uint32_t id);	// a job too: the key's write is the housekeeping task's
 #endif
 
+#if CONFIG_C4FM
+void ui_svc_c4fm_call_get(char *out, uint8_t len)
+{
+	settings_t st;
+	settings_read(&st);
+	size_t n = strnlen(st.c4fm_call, sizeof st.c4fm_call);
+	if (n >= len) {
+		n = len - 1u;
+	}
+	memcpy(out, st.c4fm_call, n);
+	out[n] = '\0';
+}
+
+void ui_svc_c4fm_call_set(const char *call)
+{
+	settings_t *st = settings_begin();
+	memset(st->c4fm_call, 0, sizeof st->c4fm_call);
+	strncpy(st->c4fm_call, call, sizeof st->c4fm_call - 1u);
+	settings_end(hal_millis());
+	radio_req_reload();	// the radio core takes the callsign on reload
+}
+#endif
+
 int32_t ui_svc_setting_get(uint8_t id)
 {
+#if CONFIG_C4FM
+	if (id >= UI_SET_FM_BCL && id <= UI_SET_VFO_OFFSET) {
+		return ui_modes_setting_get(id);
+	}
+#endif
 	radio_settings_t rs;
 	settings_t st;
 #if CONFIG_KEY_ASSIGN
@@ -270,6 +301,23 @@ int32_t ui_svc_setting_get(uint8_t id)
 	case UI_SET_C4FM_DGID:
 		settings_read(&st);
 		return st.c4fm_dgid <= 99 ? st.c4fm_dgid : 0;
+	case UI_SET_C4FM_TX_LEVEL:
+		settings_read(&st);
+		return st.c4fm_tx_level == 0 ? 100 : clamp16(st.c4fm_tx_level, 70, 130);
+	case UI_SET_C4FM_PREAMBLE:
+		settings_read(&st);
+		return (st.c4fm_preamble == 0 ? 1 : clamp16(st.c4fm_preamble, 1, 5)) * 100;
+	case UI_SET_VOICE_RX_GAIN:
+		settings_read(&st);
+		return (int16_t)clamp16(st.voice_rx_gain, -6, 12);	// clamp16 is unsigned: back to the sign
+	case UI_SET_C4FM_FT70D:
+		settings_read(&st);
+		return (st.c4fm_flags & SETTINGS_C4FM_PLAIN) == 0;
+	case UI_SET_C4FM_TEST_TONE:
+		return ambeVoiceTestSignal();
+	case UI_SET_C4FM_DECODER:
+		settings_read(&st);
+		return (st.c4fm_flags & SETTINGS_C4FM_DECODER_MASK) >> SETTINGS_C4FM_DECODER_SHIFT;
 #endif
 	case UI_SET_AUTO_OFF_MIN:
 		settings_read(&st);
@@ -375,6 +423,11 @@ int32_t ui_svc_setting_get(uint8_t id)
 
 bool ui_svc_setting_set(uint8_t id, int32_t value)
 {
+#if CONFIG_C4FM
+	if (id >= UI_SET_FM_BCL && id <= UI_SET_VFO_OFFSET) {
+		return ui_modes_setting_set(id, value);
+	}
+#endif
 	settings_t *st;
 #if CONFIG_KEY_ASSIGN
 	if (id >= UI_SET_KEY_FIRST && id <= UI_SET_KEY_LAST) {
@@ -462,6 +515,31 @@ bool ui_svc_setting_set(uint8_t id, int32_t value)
 		st->c4fm_dgid = (uint8_t)clamp16(value, 0, 99);
 		settings_end(hal_millis());
 		radio_req_reload();	// the radio core reads the DG-ID on reload
+		return true;
+	case UI_SET_C4FM_TX_LEVEL:
+	case UI_SET_C4FM_PREAMBLE:
+	case UI_SET_VOICE_RX_GAIN:
+	case UI_SET_C4FM_FT70D:
+	case UI_SET_C4FM_DECODER:
+		st = settings_begin();
+		if (id == UI_SET_C4FM_DECODER) {
+			st->c4fm_flags = (uint8_t)((st->c4fm_flags & ~SETTINGS_C4FM_DECODER_MASK) |
+						   ((clamp16(value, 0, 3) << SETTINGS_C4FM_DECODER_SHIFT) & SETTINGS_C4FM_DECODER_MASK));
+		} else if (id == UI_SET_C4FM_TX_LEVEL) {
+			st->c4fm_tx_level = (uint8_t)clamp16(value, 70, 130);
+		} else if (id == UI_SET_C4FM_PREAMBLE) {
+			st->c4fm_preamble = (uint8_t)(clamp16(value, 100, 500) / 100);
+		} else if (id == UI_SET_VOICE_RX_GAIN) {
+			st->voice_rx_gain = (int8_t)(clamp16(value, -6, 12) & ~1);
+		} else {
+			st->c4fm_flags = (uint8_t)(value ? (st->c4fm_flags & ~SETTINGS_C4FM_PLAIN)
+						: (st->c4fm_flags | SETTINGS_C4FM_PLAIN));
+		}
+		settings_end(hal_millis());
+		radio_req_reload();	// the radio core applies them on reload (radio_sm apply_prefs)
+		return true;
+	case UI_SET_C4FM_TEST_TONE:
+		ambeVoiceSetTestSignal(value != 0);
 		return true;
 #endif
 #if CONFIG_DMR_PRIVACY

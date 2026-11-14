@@ -22,7 +22,7 @@ msgstr "PC 加载器已连接"
 msgid "Power-cycle to exit"
 msgstr "断电重启退出"
 
-#: core/ui/fmt.c core/ui/ui_aprs.c core/ui/ui_menus.c core/ui/ui_screens.c
+#: core/ui/fmt.c core/ui/ui_aprs.c core/ui/ui_menus.c core/ui/ui_modes.c core/ui/ui_screens.c
 msgid "Off"
 msgstr "关"
 
@@ -1123,12 +1123,32 @@ msgid "Up Down page  Back"
 msgstr "上下翻页  返回"
 
 #: core/ui/ui_menus.c
-msgid "Last caller"
-msgstr "最近来电"
-
-#: core/ui/ui_menus.c
 msgid "Zones"
 msgstr "区域"
+
+#: core/ui/ui_menus.c
+msgid "FM"
+msgstr "FM"
+
+#: core/ui/ui_menus.c
+msgid "DMR"
+msgstr "DMR"
+
+#: core/ui/ui_menus.c core/ui/ui_screens.c
+msgid "C4FM"
+msgstr "C4FM"
+
+#: core/ui/ui_menus.c
+msgid "Switch to Memory"
+msgstr "切换到信道"
+
+#: core/ui/ui_menus.c
+msgid "Switch to VFO"
+msgstr "切换到VFO"
+
+#: core/ui/ui_menus.c
+msgid "in use"
+msgstr "使用中"
 
 #: core/ui/ui_menus.c
 msgid " new"
@@ -1141,6 +1161,10 @@ msgstr "扫描中"
 #: core/ui/ui_menus.c
 msgid "Channels: not in this build"
 msgstr "信道：本版本无"
+
+#: core/ui/ui_menus.c
+msgid "Last caller"
+msgstr "最近来电"
 
 #: core/ui/ui_menus.c
 msgid "1-7 open  Back"
@@ -3043,6 +3067,74 @@ msgid "DMR ID and name"
 msgstr "DMR ID 和名称"
 
 #: core/ui/ui_menus.c
+msgid "Carrier"
+msgstr "载波"
+
+#: core/ui/ui_menus.c
+msgid "Wrong tone"
+msgstr "亚音不对"
+
+#: core/ui/ui_menus.c
+msgid "Busy lockout"
+msgstr "忙时禁发"
+
+#: core/ui/ui_menus.c
+msgid "Roger beep"
+msgstr "尾音"
+
+#: core/ui/ui_menus.c
+msgid "Wide 25 kHz"
+msgstr "宽带 25 kHz"
+
+#: core/ui/ui_menus.c
+msgid "RX tone"
+msgstr "接收亚音"
+
+#: core/ui/ui_menus.c
+msgid "TX tone"
+msgstr "发射亚音"
+
+#: core/ui/ui_menus.c
+msgid "Repeater offset"
+msgstr "中继频差"
+
+#: core/ui/ui_menus.c
+msgid "Data and messages"
+msgstr "数据和信息"
+
+#: core/ui/ui_menus.c
+msgid "Last heard"
+msgstr "最近收到"
+
+#: core/ui/ui_menus.c
+msgid "DG-ID"
+msgstr "DG-ID"
+
+#: core/ui/ui_menus.c
+msgid "Advanced"
+msgstr "高级"
+
+#: core/ui/ui_menus.c
+msgid "TX deviation"
+msgstr "发射频偏"
+
+#: core/ui/ui_menus.c
+msgid "Preamble"
+msgstr "前导"
+
+#: core/ui/ui_menus.c
+msgid "Send as FT-70D"
+msgstr "按FT-70D发送"
+
+#: core/ui/ui_menus.c
+msgid "Test tone"
+msgstr "测试音"
+
+#: core/ui/ui_menus.c
+msgid "Voice volume"
+msgstr "语音音量"
+
+#: core/ui/ui_menus.c
 msgid "Factory reset"
 msgstr "恢复出厂设置"
 
@@ -3075,6 +3167,10 @@ msgid "Talk & Listen"
 msgstr "通话与收听"
 
 #: core/ui/ui_menus.c
+msgid "Digital voice"
+msgstr "数字语音"
+
+#: core/ui/ui_menus.c
 msgid "Privacy"
 msgstr "加密"
 
@@ -3103,12 +3199,28 @@ msgid "My radio"
 msgstr "我的电台"
 
 #: core/ui/ui_menus.c
-msgid "Advanced"
-msgstr "高级"
+msgid "C4FM advanced"
+msgstr "C4FM高级"
+
+#: core/ui/ui_menus.c
+msgid "C4FM Advanced"
+msgstr "C4FM高级"
+
+#: core/ui/ui_menus.c
+msgid "DMR data"
+msgstr "DMR数据"
+
+#: core/ui/ui_menus.c
+msgid "DMR Data"
+msgstr "DMR数据"
 
 #: core/ui/ui_menus.c
 msgid "0-9 open  Back"
 msgstr "0-9 打开  返回"
+
+#: core/ui/ui_menus.c
+msgid "Simplex"
+msgstr "同频"
 
 #: core/ui/ui_menus.c
 msgid "Talk permit tone: not in this build"
@@ -3161,6 +3273,14 @@ msgstr "本机无 GPS"
 #: core/ui/ui_menus.c
 msgid "DMR position: not in this build"
 msgstr "DMR 定位：本版本无"
+
+#: core/ui/ui_menus.c
+msgid "FM only: Quick > Mode"
+msgstr "仅FM：快捷 > 模式"
+
+#: core/ui/ui_menus.c
+msgid "VFO only: a channel's offset is in the codeplug"
+msgstr "仅VFO：信道频差在写频数据中"
 
 #: core/ui/ui_menus.c
 msgid "Diagnostics: not in this build"
@@ -3302,6 +3422,14 @@ msgstr "其他固件的电台频率？新建会清除联系人、呼号和 ID。
 msgid "Old codeplug"
 msgstr "旧电台频率"
 
+#: core/ui/ui_menus.c
+msgid "Radio ID "
+msgstr "电台ID "
+
+#: core/ui/ui_menus.c
+msgid "No C4FM station heard yet"
+msgstr "尚未收到C4FM电台"
+
 #: core/ui/ui_position.c
 msgid "Latitude"
 msgstr "纬度"
@@ -3313,6 +3441,26 @@ msgstr "经度"
 #: core/ui/ui_position.c
 msgid "Up to 90 N/S, 180 E/W"
 msgstr "北南 90，东西 180"
+
+#: core/ui/ui_screens.c
+msgid "C4FM: no modem"
+msgstr "C4FM：无调制解调器"
+
+#: core/ui/ui_screens.c
+msgid "Set a callsign: radio name"
+msgstr "请设置呼号：电台名称"
+
+#: core/ui/ui_screens.c
+msgid "VW: not played"
+msgstr "VW：不播放"
+
+#: core/ui/ui_screens.c
+msgid "V/D 1: not played"
+msgstr "V/D 1：不播放"
+
+#: core/ui/ui_screens.c
+msgid "data"
+msgstr "数据"
 
 #: core/ui/ui_screens.c
 msgid "IDLE"
@@ -3579,6 +3727,10 @@ msgid "MON: digital monitor"
 msgstr "MON：数字监听"
 
 #: core/ui/ui_screens.c
+msgid ", other DG-ID"
+msgstr "，其他DG-ID"
+
+#: core/ui/ui_screens.c
 msgid "Squelch open"
 msgstr "静噪打开"
 
@@ -3605,6 +3757,10 @@ msgstr "不能发射"
 #: core/ui/ui_screens.c
 msgid "Transmit waits for it"
 msgstr "设置前不能发射"
+
+#: core/ui/ui_screens.c
+msgid "Last heard "
+msgstr "最近收到 "
 
 #: core/ui/ui_screens.c
 msgid "Last activity "

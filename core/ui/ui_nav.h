@@ -40,6 +40,8 @@ typedef enum {
 	SCR_APRS_STATION,		// a heard station's actions
 	SCR_MESSAGE_TEXT,		// message body editor
 	SCR_DATA_SERVICES,		// Settings > Connections > Data services: ARS server, IP gateway (CONFIG_DMR_ARS / _IP_GATEWAY)
+	SCR_C4FM_HEARD,			// Menu > C4FM > Last heard (CONFIG_C4FM)
+	SCR_C4FM_CALL,			// Menu > C4FM > Callsign: the text entry (CONFIG_C4FM)
 	SCR_COUNT
 } ui_scr_t;
 

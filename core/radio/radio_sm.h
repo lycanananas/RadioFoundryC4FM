@@ -369,6 +369,10 @@ typedef struct {
 	bool c4fm_keyed;		// board.radio->tx() armed for a C4FM transmission (until tx_off)
 	uint32_t c4fm_serial;		// engine view serial last copied
 	uint8_t c4fm_dgid;		// our DG-ID (settings), 0 = all
+	uint16_t c4fm_preamble_ms;	// the settings' preamble
+	bool c4fm_plain;		// the settings' plain fields (not an FT-70D's)
+	uint8_t c4fm_decoder;		// the settings' decoder (C4FM_DECODER_*)
+	char c4fm_call[11];		// the settings' callsign, "" = the radio name's first word
 #endif
 	bool sfr_rpt;			// the channel's SFR repeater role has the modem (radio_sfr.c), not the call stack
 	bool sfr_denied;		// a repeater channel kept ordinary because the radio may not transmit or a scan

@@ -24,6 +24,9 @@
 #include "input/input.h"
 #include "radio/tones.h"
 #include "config.h"
+#if CONFIG_C4FM
+#include "ui_modes.h"
+#endif
 #if CONFIG_HOTSPOT || (CONFIG_USB_NETWORK && CONFIG_HOSTLINK)
 #include "hostlink/hostlink.h"
 #endif
@@ -2287,6 +2290,9 @@ bool ui_app_tick(const radio_view_t *v, uint32_t now_ms)
 #endif
 	ui_svc_poll();
 	ui_svc_keys_poll();
+#if CONFIG_C4FM
+	ui_modes_poll(v);	// Menu > C4FM > Last heard
+#endif
 #if CONFIG_ZONE_EDIT
 	ui_svc_zone_poll();
 #endif

@@ -16,6 +16,9 @@
 #include "config.h"
 #include "hal_time.h"
 #include "radio/tones.h"
+#if CONFIG_C4FM
+#include "ui_modes.h"
+#endif
 #include "radio/mic_gain.h"
 #include "radio/ref_trim.h"
 #include "radio/radio_am.h"
@@ -66,11 +69,76 @@ void item_num_set(ui_item_t *it, uint16_t n)
 
 enum { HUB_LAST_CALLER, HUB_CONTACTS, HUB_MESSAGES, HUB_RECENT, HUB_ZONES, HUB_CHANNELS, HUB_TOOLS, HUB_SETTINGS };
 
+#if !CONFIG_C4FM
 static bool hub_has_last(void)
 {
 	return !ui_has_action(ACT_CONTEXT);	// few-key boards: "Last caller" stands in for CONTEXT (7.5)
 }
+#endif
 
+#if CONFIG_C4FM
+static void open_mode_page(uint8_t mode);	// with the settings pages, below
+
+// The C4FM build's Menu (docs/spec/c4fm.md 6): VFO <-> memory first, the shared lists, a page per mode (the one in use
+// marked), Tools and Settings. The DMR lists (contacts, messages, recent, last caller) are on the DMR page
+enum { HUBC_VFO, HUBC_ZONES, HUBC_CHANNELS, HUBC_FM, HUBC_DMR, HUBC_C4FM, HUBC_TOOLS, HUBC_SETTINGS, HUBC_COUNT };
+
+static uint16_t hub_count(void) { return HUBC_COUNT; }
+
+static void hub_item(uint16_t i, ui_item_t *it)
+{
+	static const char *const names[] = { NULL, TRN("Zones"), TRN("Channels"), TRN("FM"), TRN("DMR"), TRN("C4FM"),
+					     TRN("Tools"), TRN("Settings") };
+	const radio_view_t *v = ui_view();
+	if (i == HUBC_VFO) {
+		str_copy(it->label, sizeof it->label, v->vfo ? TR("Switch to Memory") : TR("Switch to VFO"));
+		return;
+	}
+	str_copy(it->label, sizeof it->label, tr(names[i]));
+	item_num(it, i);
+	sbuf_t b;
+	sb_init(&b, it->value, sizeof it->value);
+	uint8_t mode = i == HUBC_FM ? RADIO_MODE_FM : i == HUBC_DMR ? RADIO_MODE_DMR : i == HUBC_C4FM ? RADIO_MODE_C4FM
+		: 0xFF;
+	if (mode != 0xFF && v->ch.mode == mode) {
+		sb_str(&b, TR("in use"));
+	} else if (i == HUBC_DMR && ui_st.unread) {
+		sb_u32(&b, ui_st.unread, 1);
+		sb_str(&b, TR(" new"));
+		it->flags |= UI_ITEM_WARN;
+	} else if (i == HUBC_ZONES) {
+		sb_str(&b, TEXT_ALT_OPEN);
+		sb_str(&b, v->vfo ? "VFO" : v->zone_name);
+		sb_str(&b, TEXT_ALT_NEXT TEXT_ALT_CLOSE);
+	} else if (i == HUBC_TOOLS && ui_st.scanning) {
+		sb_str(&b, TR("Scanning"));
+	}
+}
+
+static void hub_select(uint16_t i, bool hold)
+{
+	(void)hold;
+	switch (i) {
+	case HUBC_VFO:
+		radio_req_vfo(!ui_view()->vfo);
+		ui_go_home();
+		break;
+	case HUBC_ZONES: ui_push(SCR_ZONES, 0); break;
+	case HUBC_CHANNELS:
+		if (!CONFIG_CHANNEL_LIST) {
+			ui_toast(TR("Channels: not in this build"));
+			break;
+		}
+		ui_push(SCR_CHANNELS, 0);
+		break;
+	case HUBC_FM: open_mode_page(RADIO_MODE_FM); break;
+	case HUBC_DMR: open_mode_page(RADIO_MODE_DMR); break;
+	case HUBC_C4FM: open_mode_page(RADIO_MODE_C4FM); break;
+	case HUBC_TOOLS: ui_push(SCR_TOOLS, 0); break;
+	default: ui_push(SCR_SETTINGS, 0); break;
+	}
+}
+#else
 static uint16_t hub_count(void) { return hub_has_last() ? 8 : 7; }
 
 static uint8_t hub_entry(uint16_t i)
@@ -123,6 +191,8 @@ static void hub_select(uint16_t i, bool hold)
 	}
 	ui_push(scr[e], 0);
 }
+
+#endif
 
 static const ui_scr_def_t hub_screen = {
 	.name = "hub", .flags = SF_LIST | SF_NUMBERED | SF_FIELD, .hint = TRN("1-7 open  Back"),
@@ -1923,6 +1993,7 @@ static void ui_text_open(char *target, uint8_t max) { text_open(target, max, SCR
 #endif
 #if CONFIG_APRS_AFSK
 static void ui_text_open_to(char *target, uint8_t max) { text_open(target, max, SCR_APRS_TO); }
+
 #endif
 
 static void text_enter(void)
@@ -2064,6 +2135,14 @@ static const char *text_title(void)
 #if CONFIG_CHANNEL_EDIT
 static const ui_scr_def_t text_screen = {
 	.name = "text", .flags = SF_LIST, .prefix = TRN("Name"), .title = text_title,
+	.hint = TRN(TEXT_ALT_OPEN "Back delete  # ABC/123/abc  OK keep" TEXT_ALT_NEXT "Back del  # mode  OK" TEXT_ALT_CLOSE),
+	.count = text_count, .item = text_item, .key = text_key_fn, .enter = text_enter,
+};
+#endif
+
+#if CONFIG_C4FM && CONFIG_CHANNEL_EDIT
+static const ui_scr_def_t c4fm_call_screen = {
+	.name = "c4fm-call", .flags = SF_LIST, .prefix = TRN("Callsign"), .title = text_title,
 	.hint = TRN(TEXT_ALT_OPEN "Back delete  # ABC/123/abc  OK keep" TEXT_ALT_NEXT "Back del  # mode  OK" TEXT_ALT_CLOSE),
 	.count = text_count, .item = text_item, .key = text_key_fn, .enter = text_enter,
 };
@@ -2383,6 +2462,7 @@ static void ced_build(void)
 {
 	bool listen = ced_listen_band(&ced_ch);
 	bool dmr = CONFIG_DMR && ced_ch.mode == RADIO_MODE_DMR && !listen;
+	bool c4fm = CONFIG_C4FM && ced_ch.mode == RADIO_MODE_C4FM && !listen;	// FM's and DMR's rows hidden, the DG-ID
 	bool edit = CONFIG_CHANNEL_EDIT;
 	bool fresh = false, changed = false;
 #if CONFIG_CHANNEL_EDIT
@@ -2394,7 +2474,8 @@ static void ced_build(void)
 		bool fm_only = r == CE_BW || r == CE_RX_TONE || r == CE_TX_TONE || r == CE_VOX || r == CE_BURST;
 		bool dmr_only = r >= CE_CC && r <= CE_ALIAS2;
 		bool tone = r == CE_RX_TONE || r == CE_TX_TONE;
-		if ((fm_only && dmr) || (tone && listen) || (dmr_only && !dmr) || (r == CE_MODE && !CONFIG_DMR))
+		if ((fm_only && dmr) || (tone && listen) || (dmr_only && !dmr && !(c4fm && r == CE_CC)) ||
+				(r == CE_MODE && !CONFIG_DMR) || (fm_only && c4fm))
 			continue;
 		// The radio core skips the burst on a board with no TX tone, so no row for it there (a host board
 		// without a radio keeps the row)
@@ -2556,6 +2637,8 @@ static void chinfo_item(uint16_t i, ui_item_t *it)
 		it->flags |= UI_ITEM_TEMP;
 #endif
 	str_copy(it->label, sizeof it->label, tr(labels[r]));
+	if (r == CE_CC && ch->mode == RADIO_MODE_C4FM)
+		str_copy(it->label, sizeof it->label, "DG-ID");
 #if CONFIG_ZONE_SHARE
 	if (r == CE_SHARE && !(feats() & UI_FEAT_ZONE_SHARE))
 		it->flags |= UI_ITEM_DIM;
@@ -2586,7 +2669,8 @@ static void chinfo_item(uint16_t i, ui_item_t *it)
 		if (radio_am_tx_refused(ch->rx_hz))
 			sb_str(&b, "AM");
 		else
-			sb_str(&b, ch->mode == RADIO_MODE_DMR && !ced_listen_band(ch) ? "DMR" : "FM");
+			sb_str(&b, ced_listen_band(ch) ? "FM" : ch->mode == RADIO_MODE_DMR ? "DMR"
+				   : ch->mode == RADIO_MODE_C4FM ? "C4FM" : "FM");
 		break;
 	case CE_RX:
 		sb_freq(&b, ch->rx_hz);
@@ -2800,9 +2884,11 @@ static void ced_spin(int dir)
 		ced_val = (ced_val + dir + n) % n;
 		break;
 	}
-	case CE_CC:
-		ced_val = (ced_val + dir + 16) % 16;
+	case CE_CC: {
+		int32_t n = ced_ch.mode == RADIO_MODE_C4FM ? 100 : 16;	// a C4FM channel's DG-ID, else the color code
+		ced_val = (ced_val + dir + n) % n;
 		break;
+	}
 	case CE_TOT:
 		ced_val += dir * CE_TOT_STEP;
 		ced_val = ced_val < 0 ? 0 : ced_val > CE_TOT_MAX ? CE_TOT_MAX : ced_val;
@@ -2854,7 +2940,7 @@ static void ced_digit(char d)
 		break;
 	case CE_CC:
 	case CE_TOT: {
-		int32_t hi = ced_edit == CE_CC ? 15 : CE_TOT_MAX;
+		int32_t hi = ced_edit == CE_CC ? (ced_ch.mode == RADIO_MODE_C4FM ? 99 : 15) : CE_TOT_MAX;
 		v = ced_typed ? v : d - '0';
 		ced_val = v > hi ? d - '0' : v;
 		ced_typed = true;
@@ -2998,8 +3084,16 @@ static void chinfo_select(uint16_t i, bool hold)
 		if (ced_listen_band(c)) {
 			c->mode = RADIO_MODE_FM;
 			ui_toast(radio_am_tx_refused(c->rx_hz) ? TR("Air band: receive only") : TR("Broadcast: receive only"));
-		} else
-			c->mode = c->mode == RADIO_MODE_DMR ? RADIO_MODE_FM : RADIO_MODE_DMR;
+		} else if (c->mode == RADIO_MODE_FM)
+			c->mode = RADIO_MODE_DMR;
+		else if (c->mode == RADIO_MODE_DMR && CONFIG_C4FM) {
+			c->mode = RADIO_MODE_C4FM;	// FM -> DMR -> C4FM -> FM; the color code byte becomes the DG-ID
+			c->color_code = 0;
+		} else {
+			if (c->mode == RADIO_MODE_C4FM)
+				c->color_code = c->color_code & 0x0Fu;
+			c->mode = RADIO_MODE_FM;
+		}
 		break;
 	case CE_RX:
 	case CE_TX:
@@ -5417,7 +5511,9 @@ static const ui_scr_def_t tools_screen = {
 #if CONFIG_UI_SETTINGS
 
 typedef enum { ST_TOGGLE, ST_LIST, ST_NUMBER, ST_ACTION } set_type_t;
-enum { SA_DIAG, SA_FIRMWARE, SA_CODEPLUG, SA_RESET, SA_MY_RADIO, SA_CRASH, SA_LANGUAGE, SA_HARDWARE, SA_FIXED_POS, SA_DATA_SERVICES };
+enum { SA_DIAG, SA_FIRMWARE, SA_CODEPLUG, SA_RESET, SA_MY_RADIO, SA_CRASH, SA_LANGUAGE, SA_HARDWARE, SA_FIXED_POS, SA_DATA_SERVICES,
+       // The mode menus (CONFIG_C4FM): screens opened from a mode's page, and its sub-pages
+       SA_LAST_CALLER, SA_CONTACTS, SA_MESSAGES, SA_RECENT, SA_C4FM_HEARD, SA_C4FM_CALL, SA_C4FM_ADV, SA_DMR_DATA };
 
 typedef struct {
 	const char *name;
@@ -5628,6 +5724,7 @@ static const set_item_t s_display[] = {
 	// can't read the English
 	ACTION(TRN("Language"), "idioma langue sprache lingua taal jezyk", SA_LANGUAGE),
 };
+#if !CONFIG_C4FM	// the C4FM build splits these between Settings and the mode pages
 static const set_item_t s_talk[] = {
 	NUMBER(TRN("Reply window"), NULL, UI_SET_REPLY_S, 0, 30, 1, " s"),
 	LIST(TRN("TX timeout"), "TOT", UI_SET_TOT_S, v_tot, n_tot),
@@ -5654,6 +5751,7 @@ static const set_item_t s_talk[] = {
 	LIST(TRN("SFR CW ID"), "single frequency repeater morse callsign identify", UI_SET_SFR_CWID, v_sfrcwid, n_sfrcwid),
 #endif
 };
+#endif
 static const set_item_t s_privacy[] = {
 	LIST(TRN("Key type"), "privacy encryption", UI_SET_PRIVACY_TYPE, v_ptype, n_ptype),
 	NUMBER(TRN("Key"), "privacy BP", UI_SET_PRIVACY_KEY, 1, 255, 1, NULL),	// the range follows the type (set_range)
@@ -5749,13 +5847,87 @@ static const set_item_t s_keys[] = {
 };
 static const set_item_t s_my_radio[] = {
 	ACTION(TRN("DMR ID and name"), "callsign", SA_MY_RADIO),
-#if CONFIG_C4FM
-	// C4FM's one selector (docs/spec/c4fm.md): 00 hears everyone; the callsign is the radio name's first word
-	NUMBER(TRN("C4FM DG-ID"), "C4FM DGID digital group Fusion", UI_SET_C4FM_DGID, 0, 99, 1, NULL),
-#endif
 	// Also in Advanced, where users didn't look for it
 	ACTION(TRN("About"), "firmware version release build date", SA_FIRMWARE),
 };
+#if CONFIG_C4FM
+// The mode menus (docs/spec/c4fm.md 6): Menu > FM / DMR / C4FM open these pages, Settings keeps what all modes share.
+// A page's ACTION rows open the mode's screens and sub-pages
+static const int16_t v_bcl[] = { RADIO_BCL_OFF, RADIO_BCL_CARRIER, RADIO_BCL_WRONG_TONE };
+static const char *const n_bcl[] = { TRN("Off"), TRN("Carrier"), TRN("Wrong tone") };
+// Menu > FM: the receiver's rules, then the channel or VFO in use (the rows Quick has, in one place)
+static const set_item_t s_fm[] = {
+	NUMBER(TRN("Default squelch"), "FM squelch level", UI_SET_SQUELCH, 0, 9, 1, NULL),
+	LIST(TRN("Busy lockout"), "FM BCL busy channel lockout", UI_SET_FM_BCL, v_bcl, n_bcl),
+#if CONFIG_FM_TX_TONES
+	TOGGLE(TRN("Roger beep"), "FM end of transmission tone", UI_SET_FM_ROGER),
+#endif
+	TOGGLE(TRN("Wide 25 kHz"), "FM bandwidth channel spacing", UI_SET_CH_WIDE),
+	NUMBER(TRN("RX tone"), "FM CTCSS DCS receive subtone", UI_SET_CH_RX_TONE, 0, TONES_PICKER_COUNT - 1, 1, NULL),
+	NUMBER(TRN("TX tone"), "FM CTCSS DCS transmit subtone", UI_SET_CH_TX_TONE, 0, TONES_PICKER_COUNT - 1, 1, NULL),
+	NUMBER(TRN("Repeater offset"), "FM shift split duplex VFO", UI_SET_VFO_OFFSET, -10000, 10000, 25, " kHz"),
+};
+// Menu > DMR: its screens, its identity, its rules
+static const set_item_t s_dmr[] = {
+	ACTION(TRN("Last caller"), "DMR call back", SA_LAST_CALLER),
+	ACTION(TRN("Contacts"), "DMR talkgroups", SA_CONTACTS),
+#if CONFIG_DMR_SMS
+	ACTION(TRN("Messages"), "DMR SMS text", SA_MESSAGES),
+#endif
+	ACTION(TRN("Recent"), "DMR calls heard", SA_RECENT),
+	ACTION(TRN("DMR ID and name"), "DMR callsign radio ID", SA_MY_RADIO),
+	NUMBER(TRN("Reply window"), "DMR", UI_SET_REPLY_S, 0, 30, 1, " s"),
+	TOGGLE(TRN("Monitor by default"), "DMR digital monitor promiscuous hear all", UI_SET_HEAR_ALL_DEFAULT),
+	TOGGLE(TRN("Show talker alias"), "DMR", UI_SET_ALIAS_SHOW),
+	TOGGLE(TRN("Talk permit tone"), "DMR", UI_SET_TALK_PERMIT),
+	ACTION(TRN("Data and messages"), "DMR radio check call alert SMS format", SA_DMR_DATA),
+};
+// Menu > C4FM
+static const set_item_t s_c4fm[] = {
+	ACTION(TRN("Last heard"), "C4FM stations calls heard", SA_C4FM_HEARD),
+	NUMBER(TRN("DG-ID"), "C4FM DGID digital group Fusion", UI_SET_C4FM_DGID, 0, 99, 1, NULL),
+	ACTION(TRN("Callsign"), "C4FM callsign", SA_C4FM_CALL),
+	ACTION(TRN("Advanced"), "C4FM deviation preamble FT-70D test tone debug", SA_C4FM_ADV),
+};
+// Menu > C4FM > Advanced: the bench knobs. Demodulator: the software receiver with soft or hard decisions (the
+// chip's own demodulator is a later value)
+static const int16_t v_decoder[] = { 0, 1 };	// C4FM_DECODER_*
+static const char *const n_decoder[] = { TRN("Soft decisions"), TRN("Hard decisions") };
+static const set_item_t s_c4fm_adv[] = {
+	LIST(TRN("Demodulator"), "C4FM receiver decoder soft hard decisions debug", UI_SET_C4FM_DECODER, v_decoder, n_decoder),
+	NUMBER(TRN("TX deviation"), "C4FM modulation level", UI_SET_C4FM_TX_LEVEL, 70, 130, 5, "%"),
+	NUMBER(TRN("Preamble"), "C4FM lead-in", UI_SET_C4FM_PREAMBLE, 100, 500, 100, " ms"),
+	TOGGLE(TRN("Send as FT-70D"), "C4FM radio ID Wires-X fields", UI_SET_C4FM_FT70D),
+	TOGGLE(TRN("Test tone"), "C4FM vocoder tone instead of mic debug", UI_SET_C4FM_TEST_TONE),
+};
+// Settings > Digital voice: the vocoder's, DMR and C4FM alike
+static const set_item_t s_voice[] = {
+	NUMBER(TRN("Mic gain"), "microphone DMR C4FM", UI_SET_MIC_GAIN, 0, 10, 1, NULL),
+	TOGGLE(TRN("Mic AGC"), "automatic gain level DMR C4FM", UI_SET_MIC_AGC),
+	TOGGLE(TRN("Mic noise reduction"), "noise suppression background DMR C4FM", UI_SET_NOISE_REDUCTION),
+	NUMBER(TRN("Voice volume"), "DMR C4FM digital decoded voice level", UI_SET_VOICE_RX_GAIN, -6, 12, 2, " dB"),
+};
+// Settings > Talk & listen: what every mode shares
+static const set_item_t s_talk_common[] = {
+	LIST(TRN("TX timeout"), "TOT", UI_SET_TOT_S, v_tot, n_tot),
+#if CONFIG_VFO
+	LIST(TRN("VFO step"), "frequency tuning channel spacing", UI_SET_VFO_STEP, v_step, n_step),
+#endif
+#if CONFIG_VFO && CONFIG_BCAST_FM
+	LIST(TRN("FM broadcast step"), "VFO tuning radio station 200 kHz odd", UI_SET_BCAST_STEP, v_bcast_step, n_bcast_step),
+#endif
+#if CONFIG_DUAL_WATCH
+	TOGGLE(TRN("Dual watch talk back"), "reply other channel A B", UI_SET_DUAL_TALK_BACK),
+	LIST(TRN("Dual watch delay"), "resume wait reply A B", UI_SET_DUAL_DELAY_MS, v_dual_wait, n_dual_wait),
+#endif
+#if CONFIG_SFR
+	LIST(TRN("SFR receive"), "single frequency repeater both copies dual-path rx", UI_SET_SFR_RX, v_sfrrx, n_sfrrx),
+#endif
+#if CONFIG_SFR_CWID
+	LIST(TRN("SFR CW ID"), "single frequency repeater morse callsign identify", UI_SET_SFR_CWID, v_sfrcwid, n_sfrcwid),
+#endif
+};
+#endif
 static const set_item_t s_advanced[] = {
 	ACTION(TRN("About"), "firmware version license authors", SA_FIRMWARE),
 	ACTION(TRN("Codeplug"), NULL, SA_CODEPLUG),
@@ -5782,11 +5954,23 @@ static const set_item_t s_advanced[] = {
 #define GROUP_T(nm, t, a)	{ nm, t, a, sizeof a / sizeof a[0] }
 static const set_group_t groups[] = {
 	GROUP(TRN("Sound"), s_sound), GROUP(TRN("Display"), s_display),
-	GROUP_T(TRN("Talk & listen"), TRN("Talk & Listen"), s_talk), GROUP(TRN("Privacy"), s_privacy),
+#if CONFIG_C4FM
+	GROUP_T(TRN("Talk & listen"), TRN("Talk & Listen"), s_talk_common),
+	GROUP(TRN("Digital voice"), s_voice),
+#else
+	GROUP_T(TRN("Talk & listen"), TRN("Talk & Listen"), s_talk),
+#endif
+	GROUP(TRN("Privacy"), s_privacy),
 	GROUP(TRN("Location"), s_location), GROUP(TRN("Connections"), s_connections),
 	GROUP_T(TRN("Power saving"), TRN("Power Saving"), s_power),
 	GROUP(TRN("Keys"), s_keys), GROUP(TRN("Key lock"), s_lock),
 	GROUP_T(TRN("My radio"), TRN("My Radio"), s_my_radio), GROUP(TRN("Advanced"), s_advanced),
+#if CONFIG_C4FM
+	// The mode pages: last, not listed in Settings (settings_shown); Menu opens them
+	GROUP(TRN("FM"), s_fm), GROUP(TRN("DMR"), s_dmr), GROUP(TRN("C4FM"), s_c4fm),
+	GROUP_T(TRN("C4FM advanced"), TRN("C4FM Advanced"), s_c4fm_adv),
+	GROUP_T(TRN("DMR data"), TRN("DMR Data"), s_connections),
+#endif
 };
 #define GROUPS	(sizeof groups / sizeof groups[0])
 
@@ -5868,26 +6052,77 @@ const char *ui_set_item_name(uint8_t g, uint8_t i, const char **synonyms)
 	return s != NULL ? s->name : "";
 }
 
+// Which groups Settings lists: all, except in the C4FM build, where the mode pages and the DMR-only groups live in
+// Menu > FM / DMR / C4FM (s_fm .. s_connections) and Settings keeps what every mode shares
+static bool settings_shown(uint8_t g)
+{
+#if CONFIG_C4FM
+	const set_item_t *it = groups[g].items;
+	return it != s_fm && it != s_dmr && it != s_c4fm && it != s_c4fm_adv && it != s_connections && it != s_privacy &&
+	       it != s_location && it != s_my_radio;
+#else
+	(void)g;
+	return true;
+#endif
+}
+
+// The group of the i-th row Settings lists, and back
+static uint8_t settings_group(uint16_t i)
+{
+	for (uint8_t g = 0; g < GROUPS; g++) {
+		if (settings_shown(g) && i-- == 0)
+			return g;
+	}
+	return 0;
+}
+
+static uint16_t settings_row(uint8_t g)
+{
+	uint16_t r = 0;
+	for (uint8_t k = 0; k < g; k++)
+		r = (uint16_t)(r + settings_shown(k));
+	return r;
+}
+
+#if CONFIG_C4FM
+// A group by its rows (the mode pages)
+static uint8_t group_of(const set_item_t *items)
+{
+	for (uint8_t g = 0; g < GROUPS; g++) {
+		if (groups[g].items == items)
+			return g;
+	}
+	return 0;
+}
+
+static void open_mode_page(uint8_t mode)
+{
+	ui_push(SCR_GROUP, group_of(mode == RADIO_MODE_FM ? s_fm : mode == RADIO_MODE_DMR ? s_dmr : s_c4fm));
+}
+#endif
+
 void ui_open_setting(uint8_t g, uint8_t i)
 {
-	ui_push(SCR_SETTINGS, 0);
-	ui_frame()->focus = g;
+	if (settings_shown(g)) {
+		ui_push(SCR_SETTINGS, 0);
+		ui_frame()->focus = settings_row(g);
+	}
 	ui_push(SCR_GROUP, g);
 	ui_frame()->focus = i;
 }
 
-static uint16_t settings_count(void) { return GROUPS; }
+static uint16_t settings_count(void) { return settings_row(GROUPS); }
 
 static void settings_item(uint16_t i, ui_item_t *it)
 {
-	str_copy(it->label, sizeof it->label, tr(groups[i].name));
+	str_copy(it->label, sizeof it->label, tr(groups[settings_group(i)].name));
 	item_num(it, (uint16_t)(i + 1u));
 }
 
 static void settings_select(uint16_t i, bool hold)
 {
 	(void)hold;
-	ui_push(SCR_GROUP, i);
+	ui_push(SCR_GROUP, settings_group(i));
 }
 
 static const ui_scr_def_t settings_screen = {
@@ -5928,6 +6163,16 @@ static void set_value_text(const set_item_t *s, int32_t v, char *out, size_t len
 #if CONFIG_REF_TRIM
 		if (s->id == UI_SET_REF_TRIM) {
 			sb_ppm(&b, v);
+			break;
+		}
+#endif
+#if CONFIG_C4FM
+		if (s->id == UI_SET_CH_RX_TONE || s->id == UI_SET_CH_TX_TONE) {
+			ui_modes_tone_text(v, &b);
+			break;
+		}
+		if (s->id == UI_SET_VFO_OFFSET && v == 0) {
+			sb_str(&b, TR("Simplex"));
 			break;
 		}
 #endif
@@ -6001,6 +6246,14 @@ static const char *set_why_not(const set_item_t *s)
 		return board_has_gps() ? NULL : TR("No GPS on this radio");
 	case UI_SET_POS_DMR_CALLS:
 		return CONFIG_DMR_GPS ? NULL : TR("DMR position: not in this build");
+#if CONFIG_C4FM
+	case UI_SET_CH_WIDE:
+	case UI_SET_CH_RX_TONE:
+	case UI_SET_CH_TX_TONE:
+		return ui_view()->ch.mode == RADIO_MODE_FM ? NULL : TR("FM only: Quick > Mode");
+	case UI_SET_VFO_OFFSET:
+		return ui_view()->vfo ? NULL : TR("VFO only: a channel's offset is in the codeplug");
+#endif
 	default:
 		return NULL;
 	}
@@ -6029,6 +6282,17 @@ static void group_item(uint16_t i, ui_item_t *it)
 		set_value_text(s, edit ? set_value : ui_svc_setting_get(s->id), it->value, sizeof it->value);
 	else if (s->id == SA_LANGUAGE)
 		str_copy(it->value, sizeof it->value, lang_name(lang_current()));
+#if CONFIG_C4FM
+	else if (s->id == SA_C4FM_CALL)
+		str_copy(it->value, sizeof it->value, ui_view()->c4fm.call[0] != '\0' ? ui_view()->c4fm.call : "-");
+	else if (s->id == SA_MESSAGES && ui_st.unread) {
+		sbuf_t b;
+		sb_init(&b, it->value, sizeof it->value);
+		sb_u32(&b, ui_st.unread, 1);
+		sb_str(&b, TR(" new"));
+	} else if (s->id == SA_C4FM_HEARD && ui_c4fm_heard_count() > 0)
+		str_copy(it->value, sizeof it->value, ui_c4fm_heard(0)->call);
+#endif
 	if (s->id == UI_SET_PRIVACY_KEY && s->type == ST_NUMBER && !edit && ui_svc_setting_get(UI_SET_PRIVACY_TYPE) == 0)
 		strcpy(it->value, "-");
 	if (s->id == UI_SET_MIC_GAIN && !edit && mic_agc_on())
@@ -6038,6 +6302,32 @@ static void group_item(uint16_t i, ui_item_t *it)
 	if (set_why_not(s) != NULL)
 		it->flags |= UI_ITEM_DIM;
 }
+
+#if CONFIG_C4FM
+// Menu > C4FM > Callsign: the name entry on the C4FM callsign (upper case on keeping; empty = the radio name's first
+// word)
+static char c4fm_call_buf[11];
+
+static void c4fm_call_kept(void)
+{
+	for (char *c = c4fm_call_buf; *c != '\0'; c++) {
+		if (*c >= 'a' && *c <= 'z')
+			*c = (char)(*c - 'a' + 'A');
+	}
+	ui_svc_c4fm_call_set(c4fm_call_buf);
+}
+
+static void c4fm_call_edit(void)
+{
+#if CONFIG_CHANNEL_EDIT
+	ui_svc_c4fm_call_get(c4fm_call_buf, sizeof c4fm_call_buf);
+	text_open(c4fm_call_buf, sizeof c4fm_call_buf - 1u, SCR_C4FM_CALL);
+	text_done = c4fm_call_kept;
+#else
+	ui_push(SCR_DMR_ID, 0);
+#endif
+}
+#endif
 
 static void set_store(const set_item_t *s, int32_t v)
 {
@@ -6099,6 +6389,24 @@ static void group_select(uint16_t i, bool hold)
 		case SA_FIRMWARE: ui_push(SCR_ABOUT, 0); break;
 		case SA_CODEPLUG: ui_push(SCR_INFO, INFO_CODEPLUG); break;
 		case SA_MY_RADIO: ui_push(SCR_DMR_ID, 0); break;
+#if CONFIG_C4FM
+		case SA_LAST_CALLER:
+			if (ui_recent_count() == 0) {
+				ui_toast(TR("No calls heard yet"));
+			} else {
+				ui_target_t t;
+				ui_recent_target(ui_recent_get(0), &t);
+				ui_open_actions(&t);
+			}
+			break;
+		case SA_CONTACTS: ui_push(SCR_CONTACTS, 0); break;
+		case SA_MESSAGES: ui_push(SCR_MESSAGES, 0); break;
+		case SA_RECENT: ui_push(SCR_RECENT, 0); break;
+		case SA_C4FM_HEARD: ui_push(SCR_C4FM_HEARD, 0); break;
+		case SA_C4FM_CALL: c4fm_call_edit(); break;
+		case SA_C4FM_ADV: ui_push(SCR_GROUP, group_of(s_c4fm_adv)); break;
+		case SA_DMR_DATA: ui_push(SCR_GROUP, group_of(s_connections)); break;
+#endif
 		case SA_RESET: ui_push(SCR_CONFIRM, 0); break;
 		case SA_LANGUAGE: ui_push(SCR_LANGUAGE, 0); break;
 #if DATA_IDS
@@ -6612,6 +6920,45 @@ static const ui_scr_def_t cpf_screen = {
 	.count = cpf_count, .item = cpf_item, .select = cpf_select, .body = cpf_body,
 };
 
+#if CONFIG_C4FM
+// Menu > C4FM > Last heard: the C4FM stations heard, latest first (ui_modes.c)
+static uint16_t heard_count(void) { return ui_c4fm_heard_count(); }
+
+static void heard_item(uint16_t i, ui_item_t *it)
+{
+	const ui_c4fm_heard_t *h = ui_c4fm_heard((uint8_t)i);
+	if (h == NULL)
+		return;
+	str_copy(it->label, sizeof it->label, h->call);
+	sbuf_t b;
+	sb_init(&b, it->value, sizeof it->value);
+	sb_str(&b, "DG ");
+	sb_u32(&b, h->dgid, 2);
+	sb_str(&b, " ");
+	sb_age(&b, hal_millis() - h->ms);
+	if (h->busy)
+		it->flags |= UI_ITEM_DIM;
+}
+
+static const char *heard_body(void)
+{
+	static char line[40];
+	const ui_c4fm_heard_t *h = ui_c4fm_heard((uint8_t)ui_frame()->focus);
+	if (h == NULL || h->id[0] == '\0')
+		return NULL;
+	sbuf_t b;
+	sb_init(&b, line, sizeof line);
+	sb_str(&b, TR("Radio ID "));
+	sb_str(&b, h->id);
+	return line;
+}
+
+static const ui_scr_def_t c4fm_heard_screen = {
+	.name = "c4fm-heard", .flags = SF_LIST | SF_FIELD, .prefix = TRN("Last heard"), .hint = TRN("Back"),
+	.empty = TRN("No C4FM station heard yet"), .count = heard_count, .item = heard_item, .body = heard_body,
+};
+#endif
+
 const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 	[SCR_HOME] = &home_screen, [SCR_QUICK] = &quick_screen, [SCR_HUB] = &hub_screen,
 	[SCR_FIND] = &ui_find_screen, [SCR_ACTIONS] = &actions_screen, [SCR_CONTACTS] = &contacts_screen,
@@ -6628,6 +6975,12 @@ const ui_scr_def_t *const ui_scr[SCR_COUNT] = {
 #endif
 	[SCR_VOLUME] = &volume_screen, [SCR_LANGUAGE] = &lang_screen,
 	[SCR_DMR_ID] = &dmr_id_screen,
+#if CONFIG_C4FM
+	[SCR_C4FM_HEARD] = &c4fm_heard_screen,
+#endif
+#if CONFIG_C4FM && CONFIG_CHANNEL_EDIT
+	[SCR_C4FM_CALL] = &c4fm_call_screen,
+#endif
 	[SCR_CP_FOREIGN] = &cpf_screen,
 #if DATA_IDS
 	[SCR_DATA_SERVICES] = &ds_screen,

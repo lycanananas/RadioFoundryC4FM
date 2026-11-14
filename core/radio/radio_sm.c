@@ -1496,14 +1496,30 @@ static void c4fm_configure(radio_sm_t *sm)
 	c4fm_config_t c;
 	memset(&c, 0, sizeof c);
 	char call[RADIO_C4FM_CALL_LEN + 1];
-	if (radio_cwid_callsign(sm->radio_name, call, sizeof call) == 0) {
-		call[0] = '\0';	// no callsign in the radio name: receive only
+	if (sm->c4fm_call[0] != '\0') {
+		memcpy(call, sm->c4fm_call, sizeof call < sizeof sm->c4fm_call ? sizeof call : sizeof sm->c4fm_call);
+		call[sizeof call - 1] = '\0';
+	} else if (radio_cwid_callsign(sm->radio_name, call, sizeof call) == 0) {
+		call[0] = '\0';	// no callsign set and none in the radio name: receive only
 	}
 	memcpy(c.callsign, call, sizeof c.callsign);
-	c.dgid = sm->c4fm_dgid;
+	// A C4FM channel carries its own DG-ID (the color code byte); the VFO uses the setting
+	c.dgid = !sm->view.vfo && sm->view.ch.mode == RADIO_MODE_C4FM ? sm->view.ch.color_code : sm->c4fm_dgid;
+	c.preamble_ms = sm->c4fm_preamble_ms;
+	c.plain = sm->c4fm_plain;
+	c.decoder = sm->c4fm_decoder;
+	// The radio ID (five characters, as Yaesu radios send it): from the chip's unique ID, so it stays the same
+	// across restarts and differs between radios; without one, from the callsign
+	hal_chip_t chip;
+	memset(&chip, 0, sizeof chip);
+	if (board.system == NULL || board.system->chip == NULL || !board.system->chip(&chip) ||
+			(chip.uid[0] | chip.uid[1] | chip.uid[2]) == 0) {
+		memcpy(chip.uid, call, sizeof chip.uid < sizeof call ? sizeof chip.uid : sizeof call);
+	}
+	c4fm_radio_id(chip.uid, 3, c.radio_id);
 	c4fm_call_configure(&c);
 	memcpy(sm->view.c4fm.call, call, sizeof sm->view.c4fm.call);
-	sm->view.c4fm.dgid = sm->c4fm_dgid;
+	sm->view.c4fm.dgid = c.dgid;
 }
 
 // After set_mode(C4FM) and rx()
@@ -1578,6 +1594,7 @@ static void c4fm_follow(radio_sm_t *sm, uint32_t now_ms)
 		v->phase = cv->phase;
 		memcpy(v->src, cv->src, sizeof v->src);
 		memcpy(v->dst, cv->dst, sizeof v->dst);
+		memcpy(v->src_id, cv->src_id, sizeof v->src_id);
 		v->rx_dgid = cv->dgid;
 		v->rx_dt = cv->dt;
 		v->late_entry = cv->late_entry;
@@ -4610,6 +4627,16 @@ static void apply_prefs(radio_sm_t *sm, const settings_t *st)
 #if CONFIG_C4FM
 	// C4FM: the callsign comes from the radio name, the DG-ID from the settings (0 = all)
 	sm->c4fm_dgid = st->c4fm_dgid <= C4FM_DGID_MAX ? st->c4fm_dgid : 0;
+	sm->c4fm_preamble_ms = (uint16_t)((st->c4fm_preamble == 0 ? 1u : st->c4fm_preamble) * 100u);
+	sm->c4fm_plain = (st->c4fm_flags & SETTINGS_C4FM_PLAIN) != 0;
+	sm->c4fm_decoder = (uint8_t)((st->c4fm_flags & SETTINGS_C4FM_DECODER_MASK) >> SETTINGS_C4FM_DECODER_SHIFT);
+	memset(sm->c4fm_call, 0, sizeof sm->c4fm_call);
+	memcpy(sm->c4fm_call, st->c4fm_call, sizeof sm->c4fm_call - 1u);
+	if (board.c4fm != NULL && board.c4fm->set_tx_level != NULL) {
+		uint8_t lvl = st->c4fm_tx_level;
+		board.c4fm->set_tx_level(lvl == 0 ? 100u : lvl < 70u ? 70u : lvl > 130u ? 130u : lvl);	// next key-up
+	}
+	ambeVoiceSetRxGain(st->voice_rx_gain);
 	if (sm->c4fm_running) {
 		c4fm_configure(sm);
 		changed(sm);
@@ -5608,6 +5635,32 @@ void radio_sm_request(radio_sm_t *sm, const radio_req_t *req, uint32_t now_ms)
 			break;
 		}
 		int p = ((sm->view.power + req->arg) % n + n) % n;
+#if CONFIG_C4FM
+		// C4FM: three levels as on a Yaesu radio, the board's levels named L, M and H (where it has them)
+		if (sm->view.ch.mode == RADIO_MODE_C4FM) {
+			int lmh[3], k = 0;
+			static const char *const want[3] = { "L", "M", "H" };
+			for (int w = 0; w < 3; w++) {
+				for (int i = 0; i < n; i++) {
+					if (strcmp(board_power_name((uint8_t)i, sm->view.ch.tx_hz), want[w]) == 0) {
+						lmh[k++] = i;
+						break;
+					}
+				}
+			}
+			if (k == 3) {
+				int cur = 0;	// the C4FM level at or below the one in use
+				for (int i = 0; i < 3; i++) {
+					if (sm->view.power >= lmh[i]) {
+						cur = i;
+					}
+				}
+				int step = req->arg > 0 ? 1 : -1;
+				// down from a level between two of them lands on the lower one first
+				p = step < 0 && sm->view.power > lmh[cur] ? lmh[cur] : lmh[(cur + step + 3) % 3];
+			}
+		}
+#endif
 		sm->view.power = (uint8_t)p;
 		sm->temp_power = sm->view.power != channel_power(&sm->view.ch);
 		set_temporary(sm);
