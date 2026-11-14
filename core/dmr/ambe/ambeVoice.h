@@ -82,6 +82,9 @@ void ambeVoiceSetMixer(ambe_voice_mixer_t mixer);
 // board delivers it (the samples are scaled, with saturation, before the vocoder). Any task. Set through
 // radio_set_mic_gain (radio/mic_gain.h), which keeps it at 5 when the board applies the gain itself
 void ambeVoiceSetMicGain(uint8_t step);
+// Decoded voice level (Settings > C4FM > Voice volume; C4FM and DMR): -6..+12 dB in 2 dB steps, 0 = as decoded, with
+// saturation. Any task
+void ambeVoiceSetRxGain(int8_t db);
 // Test signal for DMR transmissions (the debug link's RADIO op 33, RAM only): on, the encoder gets a generated tone
 // that changes pitch every 60 ms in place of the mic, so an over carries known, varying audio whatever the mic hears
 // (the HIL audio smoke test). Any task

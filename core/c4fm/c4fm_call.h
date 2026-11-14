@@ -28,11 +28,14 @@
 #include "hal_c4fm.h"
 #include "dmr/call/dmr_call.h"	// dmr_voice_sink_t / dmr_voice_source_t: the voice path is shared with DMR
 #include "c4fm/c4fm_dsp.h"
+#include "c4fm/ysf.h"
 
 #define C4FM_CALLSIGN_LEN	10
+#define C4FM_RADIO_ID_LEN	5	// Yaesu's radio ID: five characters 0-9 A-Z
 #define C4FM_DGID_MAX		99
 #define C4FM_RX_HANG_MS		400	// no frame for this long ends a call that had no terminator
-#define C4FM_PREAMBLE_BYTES	120	// 100 ms of 0x77 before the header (receivers lock on it)
+#define C4FM_PREAMBLE_BYTES	120	// 100 ms of 0x77 before the header (receivers lock on it): the default
+#define C4FM_PREAMBLE_MAX_MS	500	// longest preamble (600 bytes: with the header it fits the modem's queue)
 #define C4FM_FT			6	// DCH cycle of seven frames
 #define C4FM_TX_LOW_BYTES	120	// queue below this (100 ms of air): send the next frame, voice or not
 
@@ -48,7 +51,18 @@ typedef enum {
 typedef struct {
 	char callsign[C4FM_CALLSIGN_LEN + 1];	// ours, upper case; "" = can't transmit
 	uint8_t dgid;				// 0 = all
+	char radio_id[C4FM_RADIO_ID_LEN + 1];	// ours (c4fm_radio_id); "" = "00000"
+	uint16_t preamble_ms;			// before the header, 100-C4FM_PREAMBLE_MAX_MS; 0 = 100
+	bool plain;				// destination ALL and CM 0, not an FT-70D's fields
+	uint8_t decoder;			// C4FM_DECODER_*
 } c4fm_config_t;
+
+// How received frames are decoded (Menu > C4FM > Advanced > Demodulator)
+enum {
+	C4FM_DECODER_SOFT,	// the software receiver with soft decisions (default)
+	C4FM_DECODER_HARD,	// the software receiver with hard decisions (the first version)
+	C4FM_DECODER_COUNT
+};
 
 typedef struct {
 	uint8_t phase;		// c4fm_phase_t
@@ -56,6 +70,7 @@ typedef struct {
 	// The call heard (RX) or the last one
 	char src[C4FM_CALLSIGN_LEN + 1];	// trailing spaces trimmed, "" until known
 	char dst[C4FM_CALLSIGN_LEN + 1];
+	char src_id[C4FM_RADIO_ID_LEN + 1];	// the caller's radio ID (destination "*****ID" or DCH FN 5), "" unknown
 	uint8_t dgid;
 	uint8_t dt;		// YSF_DT_* of the last frame
 	bool late_entry;	// no header heard for this call
@@ -65,7 +80,22 @@ typedef struct {
 	uint32_t dsp_syncs, dsp_losts, dsp_flywheels;
 	int16_t rx_gain, rx_center;	// the receiver's last level fit
 	bool rx_inverted;
+	// FICH bits the Viterbi decoder corrected, summed over the good FICHs (200 coded bits each): the raw bit error
+	// rate is about rx_fich_fec / (200 * rx_fich_ok). rx_fich_bad counts every failed FICH, also outside a call
+	uint32_t rx_fich_fec, rx_fich_ok;
 } c4fm_call_view_t;
+
+// The fields of the last call heard, as sent (diagnostics: compare another radio's bytes with ours). Cleared when a
+// call starts; the bits say which parts arrived with a good CRC
+typedef struct {
+	uint32_t serial;		// bumped on every capture
+	ysf_fich_t fich;		// the last good FICH
+	uint8_t hdr_ok, term_ok;	// bit 0 CSD1, bit 1 CSD2
+	uint8_t hdr_csd1[20], hdr_csd2[20];
+	uint8_t term_csd1[20], term_csd2[20];
+	uint8_t dch_ok;			// bit n: DCH of FN n
+	uint8_t dch[8][YSF_CALLSIGN_LEN];
+} c4fm_raw_t;
 
 void c4fm_call_init(const hal_c4fm_t *modem);
 void c4fm_call_set_voice(const dmr_voice_sink_t *sink, const dmr_voice_source_t *source);
@@ -78,10 +108,43 @@ bool c4fm_call_running(void);
 void c4fm_call_ptt(bool down);
 void c4fm_call_poll(uint32_t now_ms);
 const c4fm_call_view_t *c4fm_call_view(void);
+const c4fm_raw_t *c4fm_call_raw(void);
+
+// Bench capture (diagnostics, docs/spec/c4fm.md 8): the receiver's input audio in a ring, and the last frames' figures.
+// Armed, the ring freezes C4FM_CAP_POST samples after the next call starts (a header or a late entry), so it holds
+// the lead-in and the call's first frames; read it from RAM over the debug link (READ_MEM at samples)
+#define C4FM_CAP_SAMPLES	16000	// 2 s at 8 kHz
+#define C4FM_CAP_POST		12000	// 1.5 s after the call starts
+#define C4FM_CAP_FRAMES		32
+enum { C4FM_CAP_RUN, C4FM_CAP_ARMED, C4FM_CAP_TRIGGERED, C4FM_CAP_FROZEN };
+typedef struct {
+	uint32_t ms;			// when the frame ended
+	uint16_t sample;		// ring index at the frame's end
+	uint8_t sync_errors, flags;	// flags: bit 0 FICH good, 1 flywheel, 2 inverted
+	int16_t gain, center;
+	uint8_t fi, fn, fec, vch;	// FICH FI / FN, FICH bits corrected, VCH triplets corrected (the frame's five)
+} c4fm_cap_frame_t;
+typedef struct {
+	uint8_t state;			// C4FM_CAP_*
+	uint16_t head;			// next sample written (frozen: the oldest)
+	uint16_t post;			// samples left before freezing (triggered)
+	uint32_t frozen_ms, trigger_ms;
+	uint32_t seq;			// bumped at every freeze
+	uint8_t frame_head;		// next frame record
+	int16_t *samples;		// C4FM_CAP_SAMPLES
+	c4fm_cap_frame_t frames[C4FM_CAP_FRAMES];
+} c4fm_capture_t;
+const c4fm_capture_t *c4fm_call_capture(void);
+// 0 run (the ring records continuously), 1 arm (freeze after the next call starts), 2 freeze now
+void c4fm_call_capture_ctl(uint8_t cmd);
+// The configuration in force (our callsign and DG-ID)
+const c4fm_config_t *c4fm_call_config(void);
 // The transmitter is in use by the engine (TX_VOICE or TX_ENDING)
 bool c4fm_call_transmitting(void);
 
 // Exposed for the tests: the callsign as YSF sends it (10 characters, upper case, space padded)
 void c4fm_callsign_field(const char *call, uint8_t out[C4FM_CALLSIGN_LEN]);
+// A stable radio ID from any seed (the chip's unique ID): five characters 0-9 A-Z, never all zeros
+void c4fm_radio_id(const uint32_t *seed, unsigned words, char out[C4FM_RADIO_ID_LEN + 1]);
 
 #endif

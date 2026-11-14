@@ -62,7 +62,7 @@ static void buildFrames(void)
 }
 
 typedef struct {
-	int got, exact, fich_ok, lost, flywheel;
+	int got, exact, fich_ok, fich_soft_ok, lost, flywheel;
 	unsigned bit_errors;
 	bool inverted;
 } rx_t;
@@ -91,6 +91,9 @@ static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_
 	r->inverted = info->inverted;
 	if (ysfFichDecode(frame, NULL, NULL)) {
 		r->fich_ok++;
+	}
+	if (info->soft != NULL && ysfFichDecodeSoft(info->soft, NULL, NULL)) {
+		r->fich_soft_ok++;
 	}
 }
 
@@ -164,6 +167,12 @@ int main(void)
 	printf("noise rms 0.35 level: %d frames, %d FICH ok, %u bit errors, %d exact\n", r.got, r.fich_ok, r.bit_errors,
 	       r.exact);
 	CHECK(r.fich_ok >= NFRAMES - 2, "noise rms 0.35 level: FICH survives (%d)", r.fich_ok);
+	// Soft decisions (as the repeater captures of 2026-11-14 showed): at noise where hard decisions lose most FICHs,
+	// the soft decision Viterbi keeps nearly all
+	r = run(2000, 0, false, 1000, 3);
+	printf("noise rms 0.5 level: %d frames, FICH ok %d hard, %d soft\n", r.got, r.fich_ok, r.fich_soft_ok);
+	CHECK(r.fich_soft_ok >= r.fich_ok + 2 && r.fich_soft_ok >= (r.got * 3) / 4,
+	      "noise rms 0.5 level: soft decisions keep more FICHs (%d hard, %d soft of %d)", r.fich_ok, r.fich_soft_ok, r.got);
 
 	// Pure noise must not deliver frames that pass the FICH CRC
 	{

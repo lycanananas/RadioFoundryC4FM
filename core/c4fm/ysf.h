@@ -120,6 +120,14 @@ void ysfVd2Encode(const uint8_t dch[YSF_CALLSIGN_LEN], const uint8_t ambe[YSF_VC
 bool ysfVd2Decode(const uint8_t *frame, uint8_t dch[YSF_CALLSIGN_LEN], uint8_t ambe[YSF_VCH_PER_FRAME][YSF_AMBE_BITS],
 		  uint8_t vch_errors[YSF_VCH_PER_FRAME]);
 
+// The same decoders on soft decisions (c4fm_frame_info_t.soft: one int8 per frame bit, > 0 a 1, the magnitude its
+// confidence): a soft decision Viterbi for the FICH, CSD and DCH, a weighted majority for the VCH's repeated bits.
+// errors / vch_errors count the hard bits corrected, as the hard decoders do
+bool ysfFichDecodeSoft(const int8_t *soft, ysf_fich_t *f, ysf_fec_info_t *info);
+unsigned ysfCsdDecodeSoft(const int8_t *soft, uint8_t csd1[20], uint8_t csd2[20]);
+bool ysfVd2DecodeSoft(const int8_t *soft, uint8_t dch[YSF_CALLSIGN_LEN], uint8_t ambe[YSF_VCH_PER_FRAME][YSF_AMBE_BITS],
+		      uint8_t vch_errors[YSF_VCH_PER_FRAME]);
+
 // One VCH alone (exposed for the tests): 49 bits -> 13 bytes whitened and interleaved, and back
 void ysfVchEncode(const uint8_t ambe[YSF_AMBE_BITS], uint8_t vch[13]);
 unsigned ysfVchDecode(const uint8_t vch[13], uint8_t ambe[YSF_AMBE_BITS]);

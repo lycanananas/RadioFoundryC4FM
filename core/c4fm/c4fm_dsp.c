@@ -104,6 +104,29 @@ static void fit(c4fm_demod_t *d, int64_t c, int32_t sx)
 	d->center = (int32_t)(((int64_t)sx * rn - c * sum_l) / ((int64_t)SYNC_SYMS * rn));
 }
 
+static int8_t clamp8(int32_t v)
+{
+	return (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v);
+}
+
+// The two bits' soft values of a sample (c4fm_frame_info_t.soft): the dibit's MSB is 1 for the negative levels, its
+// LSB for the outer ones, so MSB = -z and LSB = |z| - 2 in level units z, 32 to a unit
+static void softBits(const c4fm_demod_t *d, int32_t y, int8_t out[2])
+{
+	int32_t t = y - d->center, g = d->gain16;
+	if (g < 0) {
+		t = -t;
+		g = -g;
+	}
+	if (g == 0) {
+		out[0] = out[1] = 0;
+		return;
+	}
+	int32_t z32 = (int32_t)(((int64_t)t * 16 * 32) / g);	// level x 32
+	out[0] = clamp8(-z32);
+	out[1] = clamp8((z32 < 0 ? -z32 : z32) - 64);
+}
+
 static uint8_t slice(const c4fm_demod_t *d, int32_t y)
 {
 	int32_t t = y - d->center, g = d->gain16;
@@ -187,12 +210,18 @@ static void locked(c4fm_demod_t *d)
 	if (d->sym < DATA_SYMS) {
 		if (d->n == d->sync_end + (uint32_t)(C4FM_SPS * (d->sym + 1))) {
 			unsigned bit = 2u * (SYNC_SYMS + d->sym);
-			uint8_t dibit = slice(d, ysamp(d, d->n));
+			int32_t y = ysamp(d, d->n);
+			uint8_t dibit = slice(d, y);
 			ysfPutBit(d->frame, bit, dibit >> 1);
 			ysfPutBit(d->frame, bit + 1, dibit & 1);
+			softBits(d, y, &d->soft[bit]);
 			if (++d->sym == DATA_SYMS) {
 				d->frames++;
 				d->flywheels += d->flywheel;
+				for (unsigned k = 0; k < 2u * SYNC_SYMS; k++) {
+					d->soft[k] = ysfGetBit(d->frame, k) ? 127 : -127;	// the sync: as sent
+				}
+				d->info.soft = d->soft;
 				if (d->on_frame != NULL) {
 					d->on_frame(d->frame, &d->info, d->ctx);
 				}

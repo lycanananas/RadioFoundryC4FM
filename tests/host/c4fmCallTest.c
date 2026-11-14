@@ -160,7 +160,7 @@ int main(void)
 	// (its stream recorded on air), then the recorded air is played into the same engine as B.
 	c4fm_call_init(&modemA);
 	c4fm_call_set_voice(NULL, &source);
-	c4fm_config_t ca = { .callsign = "sp9abc", .dgid = 0 };
+	c4fm_config_t ca = { .callsign = "sp9abc", .dgid = 0, .radio_id = "K7Q2Z" };
 	c4fm_call_configure(&ca);
 	CHECK(c4fm_call_start(), "start");
 
@@ -200,7 +200,8 @@ int main(void)
 	      "header frame after the preamble");
 	uint8_t csd1[20];
 	CHECK(ysfCsdDecode(air + pos, csd1, NULL) & 1u, "header CSD1");
-	CHECK(memcmp(csd1, "ALL       SP9ABC    ", 20) == 0, "CSD1 ALL / SP9ABC");
+	CHECK(memcmp(csd1, "*****K7Q2ZSP9ABC    ", 20) == 0, "CSD1 *****radio ID / SP9ABC, as an FT-70D");
+	CHECK(f.cm == YSF_CM_GROUP2, "FICH CM 1, as an FT-70D");
 	uint32_t fr = pos + 120, comms = 0, fn_ok = 1;
 	uint8_t want_fn = 0;
 	while (fr + 120 <= air_n && ysfFichDecode(air + fr, &f, NULL) && f.fi == YSF_FI_COMMS) {
@@ -226,6 +227,9 @@ int main(void)
 		c4fm_config_t cb = { .callsign = "SP9XYZ", .dgid = pass == 2 ? 5 : 0 };
 		c4fm_call_configure(&cb);
 		c4fm_call_start();
+		if (pass == 0) {
+			c4fm_call_capture_ctl(1);	// the bench capture: armed, it freezes 1.5 s after the call starts
+		}
 		sink_count = sink_bad = sink_calls = sink_ends = sink_first = 0;
 		c4fm_mod_t m2;
 		c4fmModInit(&m2, 1800);
@@ -262,10 +266,72 @@ int main(void)
 			CHECK(pass == 1 ? sink_first + sink_count == sent && sink_count > 0 : sink_count == sent,
 			      "pass %d: voice frames %u of %u", pass, sink_count, sent);
 			CHECK(w->late_entry == (pass == 1), "pass %d: late entry flag", pass);
+			// The raw capture (debug link c4fm_raw): A's fields byte for byte, as A's own encoder wrote them
+			const c4fm_raw_t *r = c4fm_call_raw();
+			uint8_t want[YSF_CALLSIGN_LEN];
+			c4fm_callsign_field("SP9ABC", want);
+			CHECK(r->dch_ok == 0x7F && memcmp(r->dch[1], want, sizeof want) == 0,
+			      "pass %d: raw DCH FN 0-6 captured, FN 1 the caller (0x%02x)", pass, r->dch_ok);
+			// The FT-70D's layout (recorded 2026-11-14: "*****H6MMG", "     H6MMG", FN 6 below), our ID and call
+			CHECK(memcmp(r->dch[0], "*****K7Q2Z", 10) == 0, "pass %d: raw DCH FN 0 *****radio ID", pass);
+			CHECK(memcmp(r->dch[5], "     K7Q2Z", 10) == 0, "pass %d: raw DCH FN 5 radio ID", pass);
+			static const uint8_t ft70d_fn6[YSF_CALLSIGN_LEN] = { 0x01, 0x22, 0x61, 0x5F, 0x2B, 0x03, 0x11, 0, 0, 0 };
+			CHECK(memcmp(r->dch[6], ft70d_fn6, sizeof ft70d_fn6) == 0, "pass %d: raw DCH FN 6 as the FT-70D's", pass);
+			CHECK(memcmp(r->dch[2], "          ", 10) == 0 && memcmp(r->dch[4], "          ", 10) == 0,
+			      "pass %d: raw DCH FN 2, 4 blank", pass);
+			CHECK(r->fich.cm == YSF_CM_GROUP2, "pass %d: raw FICH CM 1", pass);
+			CHECK(strcmp(w->src_id, "K7Q2Z") == 0, "pass %d: caller's radio ID '%s'", pass, w->src_id);
+			CHECK((r->term_ok & 1u) && memcmp(r->term_csd1, "*****K7Q2ZSP9ABC    ", 20) == 0,
+			      "pass %d: raw terminator CSD1", pass);
+			CHECK(r->fich.dt == YSF_DT_VD2 && r->fich.ft == C4FM_FT, "pass %d: raw FICH DT / FT", pass);
+			if (pass == 0) {
+				const c4fm_capture_t *cp = c4fm_call_capture();
+				uint8_t good = 0;
+				for (int k = 0; k < C4FM_CAP_FRAMES && k < cp->frame_head; k++) {
+					good += (cp->frames[k].flags & 1u) != 0;
+				}
+				CHECK(cp->state == C4FM_CAP_FROZEN && cp->seq == 1 && cp->frame_head >= 15 && good >= 14,
+				      "capture frozen after the call started, %u frames recorded, %u FICH good", cp->frame_head,
+				      good);
+				CHECK((r->hdr_ok & 3u) == 3u && memcmp(r->hdr_csd1, "*****K7Q2ZSP9ABC    ", 20) == 0,
+				      "header CSD1 / CSD2 captured");
+				CHECK(w->rx_fich_fec == 0 && w->rx_fich_ok >= 20, "clean channel: %u good FICHs, no bits corrected (%u)",
+				      w->rx_fich_ok, w->rx_fich_fec);
+			} else {
+				CHECK(r->hdr_ok == 0, "late entry: no header captured");
+			}
 		} else {
 			CHECK(!saw_rx && saw_busy && sink_calls == 0, "DG-ID 5 doesn't play a DG-ID 0 call");
 		}
 		CHECK(w->phase == C4FM_PHASE_IDLE, "pass %d: idle after", pass);
+	}
+
+	// Radio IDs: five of 0-9 A-Z, the same for the same seed, different for different chips
+	{
+		const uint32_t s1[3] = { 0x12345678u, 0x9ABCDEF0u, 0x0F1E2D3Cu }, s2[3] = { 0x12345679u, 0x9ABCDEF0u, 0x0F1E2D3Cu };
+		char a[6], b[6], c[6];
+		c4fm_radio_id(s1, 3, a);
+		c4fm_radio_id(s1, 3, b);
+		c4fm_radio_id(s2, 3, c);
+		bool charset = strlen(a) == 5;
+		for (int i = 0; i < 5; i++) {
+			charset &= (a[i] >= '0' && a[i] <= '9') || (a[i] >= 'A' && a[i] <= 'Z');
+		}
+		CHECK(charset && strcmp(a, b) == 0 && strcmp(a, c) != 0, "radio ID '%s' stable, '%s' for another chip", a, c);
+		int same = 0;
+		char seen[64][6];
+		for (uint32_t k = 0; k < 64; k++) {
+			const uint32_t sk[3] = { k, 0x5A5A0000u, 0 };
+			c4fm_radio_id(sk, 3, seen[k]);
+			for (uint32_t j = 0; j < k; j++) {
+				same += strcmp(seen[j], seen[k]) == 0;
+			}
+		}
+		CHECK(same == 0, "64 nearby chips, 64 radio IDs (%d alike)", same);
+		// A malformed ID in the configuration sends 00000
+		c4fm_config_t bad = { .callsign = "SP9ABC", .radio_id = "ab#12" };
+		c4fm_call_configure(&bad);
+		CHECK(c4fm_call_config()->radio_id[0] == '\0', "malformed radio ID refused");
 	}
 
 	printf("c4fmCallTest: %d checks, %d failures\n", checks, failures);

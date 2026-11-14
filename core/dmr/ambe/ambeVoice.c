@@ -55,6 +55,7 @@ static bool have_last;
 static ambe_voice_stats_t stats;
 static ambe_voice_mixer_t mixer;
 static bool cb_mixing;
+static uint16_t rx_gain_q8 = 256;	// ambeVoiceSetRxGain: the decoded voice times this / 256
 static uint16_t mic_gain_q8 = 256;	// ambeVoiceSetMicGain: the mic samples times this / 256 before encoding
 static bool test_signal;		// ambeVoiceSetTestSignal
 static uint16_t test_phase;		// the test signal's phase (a full cycle is 65536) and its pitch step
@@ -448,6 +449,13 @@ void ambeVoiceAudioBlock(const int16_t *mic, int16_t *spk, void *ctx)
 	// DMR is simplex: TX first (a fresh transmission resets the vocoder), then RX playback
 	tx_block(mic);
 	rx_block(spk);
+	uint16_t rg = LOAD(rx_gain_q8);
+	if (rg != 256) {
+		for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++) {
+			int32_t v = ((int32_t)spk[i] * rg) / 256;
+			spk[i] = (int16_t)(v > 32767 ? 32767 : v < -32768 ? -32768 : v);
+		}
+	}
 	ambe_voice_mixer_t mix = LOAD(mixer);
 	if (mix != NULL && mix(spk)) {
 		cb_mixing = true;
@@ -467,6 +475,13 @@ void ambeVoiceSetMicGain(uint8_t step)
 {
 	static const uint16_t q8[11] = { 81, 102, 128, 161, 203, 256, 322, 406, 511, 643, 810 };
 	STORE(mic_gain_q8, q8[step > 10 ? 10 : step]);
+}
+
+void ambeVoiceSetRxGain(int8_t db)
+{
+	static const uint16_t q8[10] = { 128, 161, 203, 256, 322, 406, 511, 643, 810, 1020 };	// -6 .. +12 dB
+	int i = (db < -6 ? -6 : db > 12 ? 12 : db) / 2 + 3;
+	STORE(rx_gain_q8, q8[i]);
 }
 
 void ambeVoiceSetEncodeOptions(uint32_t opts)

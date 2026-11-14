@@ -31,6 +31,9 @@ typedef struct {
 	bool flywheel;		// this frame's sync was missed: sliced on the previous timing and levels
 	int16_t gain;		// sampled value per level unit (+-1 = inner, +-3 = outer)
 	int16_t center;		// sampled DC
+	// Soft decisions, one per frame bit (960, the sync's included): > 0 a 1, < 0 a 0, the magnitude how far the
+	// sample was from the decision threshold (32 = one level unit). The ysf*DecodeSoft decoders take them
+	const int8_t *soft;
 } c4fm_frame_info_t;
 
 // A whole 120-byte frame (sync included, as ideal bits)
@@ -61,6 +64,7 @@ typedef struct {
 	uint8_t misses;
 	bool flywheel;
 	uint8_t frame[YSF_FRAME_BYTES];
+	int8_t soft[YSF_FRAME_BYTES * 8];
 	c4fm_frame_info_t info;
 
 	// statistics

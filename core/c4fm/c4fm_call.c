@@ -14,6 +14,9 @@ static const dmr_voice_sink_t *sink;
 static const dmr_voice_source_t *source;
 static c4fm_config_t cfg;
 static c4fm_call_view_t view;
+static c4fm_raw_t raw;
+static int16_t cap_samples[C4FM_CAP_SAMPLES];
+static c4fm_capture_t cap = { .samples = cap_samples };
 static c4fm_demod_t demod;
 static bool running;
 static bool ptt;
@@ -47,6 +50,28 @@ void c4fm_callsign_field(const char *call, uint8_t out[C4FM_CALLSIGN_LEN])
 	}
 }
 
+void c4fm_radio_id(const uint32_t *seed, unsigned words, char out[C4FM_RADIO_ID_LEN + 1])
+{
+	uint32_t h = 2166136261u;	// FNV-1a over the seed's bytes
+	for (unsigned w = 0; w < words; w++) {
+		for (int b = 0; b < 4; b++) {
+			h = (h ^ ((seed[w] >> (8 * b)) & 0xFFu)) * 16777619u;
+		}
+	}
+	h ^= h >> 15;
+	h *= 0x2C1B3C6Du;
+	h ^= h >> 12;
+	static const char digits[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	for (int i = C4FM_RADIO_ID_LEN - 1; i >= 0; i--) {
+		out[i] = digits[h % 36u];
+		h /= 36u;
+	}
+	if (memcmp(out, "00000", 5) == 0) {
+		out[0] = 'A';	// "00000" is the engine's "none"
+	}
+	out[C4FM_RADIO_ID_LEN] = '\0';
+}
+
 // A received 10-byte field to text: printable characters only, trailing spaces trimmed
 static void fieldText(const uint8_t *f, char out[C4FM_CALLSIGN_LEN + 1])
 {
@@ -61,6 +86,27 @@ static void fieldText(const uint8_t *f, char out[C4FM_CALLSIGN_LEN + 1])
 }
 
 // --- receive ---
+
+// The caller's radio ID: the destination "*****ID" (FN 0, the header) or the end of DCH FN 5, five of 0-9 A-Z
+static void takeRadioId(const uint8_t *field, uint8_t fn)
+{
+	if (fn == 0 && memcmp(field, "*****", 5) != 0) {
+		return;
+	}
+	char id[C4FM_RADIO_ID_LEN + 1];
+	for (int i = 0; i < C4FM_RADIO_ID_LEN; i++) {
+		char c = (char)field[5 + i];
+		if (!((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z'))) {
+			return;
+		}
+		id[i] = c;
+	}
+	id[C4FM_RADIO_ID_LEN] = '\0';
+	if (strcmp(id, view.src_id) != 0) {
+		memcpy(view.src_id, id, sizeof id);
+		changed();
+	}
+}
 
 static void callEnd(void)
 {
@@ -79,8 +125,15 @@ static void callBegin(bool play, bool late)
 	if (view.phase == C4FM_PHASE_RX_VOICE || view.phase == C4FM_PHASE_RX_BUSY) {
 		return;
 	}
-	view.src[0] = view.dst[0] = '\0';
+	view.src[0] = view.dst[0] = view.src_id[0] = '\0';
 	view.late_entry = late;
+	if (cap.state == C4FM_CAP_ARMED) {
+		cap.state = C4FM_CAP_TRIGGERED;
+		cap.post = C4FM_CAP_POST;
+		cap.trigger_ms = now;
+	}
+	raw.hdr_ok = raw.term_ok = raw.dch_ok = 0;
+	raw.serial++;
 	view.rx_calls++;
 	view.phase = play ? C4FM_PHASE_RX_VOICE : C4FM_PHASE_RX_BUSY;
 	if (play && sink != NULL) {
@@ -105,11 +158,42 @@ static void playAmbe(const uint8_t ambe[YSF_VCH_PER_FRAME][YSF_AMBE_BITS])
 	}
 }
 
-static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_t *info, void *ctx)
+static void capFrame(const c4fm_frame_info_t *info, bool fich, const ysf_fich_t *f, uint8_t fec, uint8_t vch)
 {
-	(void)ctx;
+	if (cap.state == C4FM_CAP_FROZEN) {
+		return;
+	}
+	c4fm_cap_frame_t *r = &cap.frames[cap.frame_head % C4FM_CAP_FRAMES];
+	cap.frame_head++;
+	r->ms = now;
+	r->sample = cap.head;
+	r->sync_errors = info->sync_errors;
+	r->flags = (uint8_t)((fich ? 1u : 0u) | (info->flywheel ? 2u : 0u) | (info->inverted ? 4u : 0u));
+	r->gain = info->gain;
+	r->center = info->center;
+	r->fi = fich ? f->fi : 0xFF;
+	r->fn = fich ? f->fn : 0xFF;
+	r->fec = fec;
+	r->vch = vch;
+}
+
+static uint8_t frame_vch;	// the frame's VCH triplets corrected (capFrame)
+
+static void onFrameBody(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_t *info, ysf_fich_t *f_out,
+			bool *fich_out, uint8_t *fec_out)
+{
 	ysf_fich_t f;
-	bool fich = ysfFichDecode(frame, &f, NULL);
+	ysf_fec_info_t fec;
+	bool soft = cfg.decoder == C4FM_DECODER_SOFT && info->soft != NULL;
+	bool fich = soft ? ysfFichDecodeSoft(info->soft, &f, &fec) : ysfFichDecode(frame, &f, &fec);
+	*fich_out = fich;
+	*fec_out = fich ? fec.errors : 0;
+	*f_out = f;
+	if (fich) {
+		view.rx_fich_fec += fec.errors;
+		view.rx_fich_ok++;
+		raw.fich = f;
+	}
 	view.rx_gain = info->gain;
 	view.rx_center = info->center;
 	view.rx_inverted = info->inverted;
@@ -139,10 +223,13 @@ static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_
 		view.dgid = f.dgid;
 		view.dt = f.dt;
 		callBegin(ours && dn, false);
-		uint8_t csd1[20];
-		if ((ysfCsdDecode(frame, csd1, NULL) & 1u) != 0) {
-			fieldText(csd1, view.dst);
-			fieldText(csd1 + 10, view.src);
+		raw.hdr_ok = (uint8_t)(soft ? ysfCsdDecodeSoft(info->soft, raw.hdr_csd1, raw.hdr_csd2)
+					     : ysfCsdDecode(frame, raw.hdr_csd1, raw.hdr_csd2));
+		raw.serial++;
+		if ((raw.hdr_ok & 1u) != 0) {
+			takeRadioId(raw.hdr_csd1, 0);
+			fieldText(raw.hdr_csd1, view.dst);
+			fieldText(raw.hdr_csd1 + 10, view.src);
 			changed();
 		}
 		break;
@@ -161,9 +248,18 @@ static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_
 			break;
 		}
 		uint8_t dch[YSF_CALLSIGN_LEN], ambe[YSF_VCH_PER_FRAME][YSF_AMBE_BITS], errs[YSF_VCH_PER_FRAME];
-		bool dch_ok = ysfVd2Decode(frame, dch, ambe, errs);
+		bool dch_ok = soft ? ysfVd2DecodeSoft(info->soft, dch, ambe, errs) : ysfVd2Decode(frame, dch, ambe, errs);
 		for (int j = 0; j < YSF_VCH_PER_FRAME; j++) {
 			view.rx_vch_errors += errs[j];
+			frame_vch = (uint8_t)(frame_vch + errs[j]);
+		}
+		if (dch_ok && (f.fn == 0 || f.fn == 5)) {
+			takeRadioId(dch, f.fn);
+		}
+		if (dch_ok && f.fn < 8) {
+			memcpy(raw.dch[f.fn], dch, YSF_CALLSIGN_LEN);
+			raw.dch_ok |= (uint8_t)(1u << f.fn);
+			raw.serial++;
 		}
 		if (dch_ok && (f.fn == 0 || f.fn == 1)) {
 			char *dst = f.fn == 1 ? view.src : view.dst;
@@ -178,6 +274,9 @@ static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_
 		break;
 	}
 	case YSF_FI_TERMINATOR:
+		raw.term_ok = (uint8_t)(soft ? ysfCsdDecodeSoft(info->soft, raw.term_csd1, raw.term_csd2)
+					      : ysfCsdDecode(frame, raw.term_csd1, raw.term_csd2));
+		raw.serial++;
 		callEnd();
 		break;
 	default:
@@ -185,10 +284,35 @@ static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_
 	}
 }
 
+static void onFrame(const uint8_t frame[YSF_FRAME_BYTES], const c4fm_frame_info_t *info, void *ctx)
+{
+	(void)ctx;
+	ysf_fich_t f;
+	bool fich = false;
+	uint8_t fec = 0;
+	frame_vch = 0;
+	onFrameBody(frame, info, &f, &fich, &fec);
+	capFrame(info, fich, &f, fec, frame_vch);
+}
+
 static void onLost(void *ctx)
 {
 	(void)ctx;
 	callEnd();
+}
+
+// The input ring (bench capture): written before the receiver sees the block, so a frame's record points past it
+static void capSamples(const int16_t *buf, uint16_t n)
+{
+	for (uint16_t i = 0; i < n && cap.state != C4FM_CAP_FROZEN; i++) {
+		cap.samples[cap.head] = buf[i];
+		cap.head = (uint16_t)(cap.head + 1u >= C4FM_CAP_SAMPLES ? 0 : cap.head + 1u);
+		if (cap.state == C4FM_CAP_TRIGGERED && --cap.post == 0) {
+			cap.state = C4FM_CAP_FROZEN;
+			cap.frozen_ms = now;
+			cap.seq++;
+		}
+	}
 }
 
 static void rxService(void)
@@ -199,6 +323,7 @@ static void rxService(void)
 	int16_t buf[128];
 	uint16_t n;
 	while ((n = modem->rx_read(buf, sizeof buf / sizeof buf[0])) > 0) {
+		capSamples(buf, n);
 		c4fmDemodFeed(&demod, buf, n);
 	}
 	if (view.phase == C4FM_PHASE_RX_VOICE || view.phase == C4FM_PHASE_RX_BUSY) {
@@ -218,7 +343,7 @@ static void fichFor(uint8_t fi, uint8_t fn, ysf_fich_t *f)
 	memset(f, 0, sizeof *f);
 	f->fi = fi;
 	f->cs = 2;
-	f->cm = YSF_CM_GROUP1;
+	f->cm = cfg.plain ? YSF_CM_GROUP1 : YSF_CM_GROUP2;	// an FT-70D: CM 1, destination "*****" + radio ID
 	f->fn = fn;
 	f->ft = C4FM_FT;
 	f->mr = YSF_MR_DIRECT;
@@ -226,10 +351,31 @@ static void fichFor(uint8_t fi, uint8_t fn, ysf_fich_t *f)
 	f->dgid = cfg.dgid;
 }
 
+// The fields as an FT-70D fills them (measured on air, docs/spec/c4fm.md 3): the destination is five asterisks and
+// the radio ID, the radio ID again at the end of DCH FN 5, and FN 6 a fixed data block (meaning unknown: copied)
+static const uint8_t ft70d_fn6[YSF_CALLSIGN_LEN] = { 0x01, 0x22, 0x61, 0x5F, 0x2B, 0x03, 0x11, 0x00, 0x00, 0x00 };
+
+static void radioId(uint8_t out[C4FM_RADIO_ID_LEN])
+{
+	for (int i = 0; i < C4FM_RADIO_ID_LEN; i++) {
+		out[i] = cfg.radio_id[0] != '\0' ? (uint8_t)cfg.radio_id[i] : '0';
+	}
+}
+
+static void destField(uint8_t out[YSF_CALLSIGN_LEN])
+{
+	if (cfg.plain) {
+		c4fm_callsign_field("ALL", out);
+		return;
+	}
+	memset(out, '*', 5);
+	radioId(out + 5);
+}
+
 static void csdFrame(uint8_t fi, uint8_t frame[YSF_FRAME_BYTES])
 {
 	uint8_t csd1[20], csd2[20];
-	c4fm_callsign_field("ALL", csd1);
+	destField(csd1);
 	c4fm_callsign_field(cfg.callsign, csd1 + 10);
 	memset(csd2, ' ', sizeof csd2);
 	ysf_fich_t f;
@@ -240,17 +386,29 @@ static void csdFrame(uint8_t fi, uint8_t frame[YSF_FRAME_BYTES])
 	ysfCsdEncode(csd1, csd2, frame);
 }
 
-// DCH content by FN: destination, source, downlink, uplink, two remarks (blank), then data (none: zeros)
+// DCH content by FN: destination, source, downlink, uplink, remarks 1-2 (blank), remarks 3-4 (blank, radio ID), data
 static void dchFor(uint8_t fn, uint8_t dch[YSF_CALLSIGN_LEN])
 {
 	switch (fn) {
 	case 0:
-		c4fm_callsign_field("ALL", dch);
+		destField(dch);
 		break;
 	case 1:
 		c4fm_callsign_field(cfg.callsign, dch);
 		break;
+	case 5:
+		memset(dch, ' ', YSF_CALLSIGN_LEN);
+		if (!cfg.plain) {
+			radioId(dch + 5);
+		}
+		break;
 	case 6:
+		if (cfg.plain) {
+			memset(dch, 0, YSF_CALLSIGN_LEN);
+		} else {
+			memcpy(dch, ft70d_fn6, YSF_CALLSIGN_LEN);
+		}
+		break;
 	case 7:
 		memset(dch, 0, YSF_CALLSIGN_LEN);
 		break;
@@ -307,7 +465,9 @@ static void txBegin(void)
 	}
 	uint8_t pre[C4FM_PREAMBLE_BYTES];
 	memset(pre, 0x77, sizeof pre);
-	txWrite(pre, sizeof pre);
+	for (uint16_t ms = 0; ms < cfg.preamble_ms; ms += 100) {
+		txWrite(pre, sizeof pre);
+	}
 	uint8_t frame[YSF_FRAME_BYTES];
 	csdFrame(YSF_FI_HEADER, frame);
 	txWrite(frame, sizeof frame);
@@ -368,6 +528,7 @@ void c4fm_call_init(const hal_c4fm_t *m)
 {
 	modem = m;
 	memset(&view, 0, sizeof view);
+	memset(&raw, 0, sizeof raw);
 	c4fmDemodInit(&demod, onFrame, onLost, NULL);
 	running = false;
 	ptt = false;
@@ -386,6 +547,20 @@ void c4fm_call_configure(const c4fm_config_t *c)
 	cfg.dgid = c->dgid > C4FM_DGID_MAX ? 0 : c->dgid;
 	c4fm_callsign_field(c->callsign, field);
 	fieldText(field, cfg.callsign);
+	// Only a well-formed ID (five of 0-9 A-Z); anything else sends "00000"
+	cfg.radio_id[0] = '\0';
+	bool ok = strlen(c->radio_id) == C4FM_RADIO_ID_LEN;
+	for (int i = 0; ok && i < C4FM_RADIO_ID_LEN; i++) {
+		char ch = c->radio_id[i];
+		ok = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z');
+	}
+	if (ok) {
+		memcpy(cfg.radio_id, c->radio_id, sizeof cfg.radio_id);
+	}
+	cfg.preamble_ms = c->preamble_ms == 0 ? 100 : c->preamble_ms > C4FM_PREAMBLE_MAX_MS ? C4FM_PREAMBLE_MAX_MS
+		: (uint16_t)((c->preamble_ms + 99) / 100 * 100);
+	cfg.plain = c->plain;
+	cfg.decoder = c->decoder < C4FM_DECODER_COUNT ? c->decoder : C4FM_DECODER_SOFT;
 }
 
 bool c4fm_call_start(void)
@@ -461,4 +636,33 @@ void c4fm_call_poll(uint32_t now_ms)
 const c4fm_call_view_t *c4fm_call_view(void)
 {
 	return &view;
+}
+
+const c4fm_raw_t *c4fm_call_raw(void)
+{
+	return &raw;
+}
+
+const c4fm_capture_t *c4fm_call_capture(void)
+{
+	return &cap;
+}
+
+void c4fm_call_capture_ctl(uint8_t cmd)
+{
+	if (cmd == 2) {
+		if (cap.state != C4FM_CAP_FROZEN) {
+			cap.state = C4FM_CAP_FROZEN;
+			cap.frozen_ms = now;
+			cap.trigger_ms = now;
+			cap.seq++;
+		}
+	} else {
+		cap.state = cmd == 1 ? C4FM_CAP_ARMED : C4FM_CAP_RUN;
+	}
+}
+
+const c4fm_config_t *c4fm_call_config(void)
+{
+	return &cfg;
 }
