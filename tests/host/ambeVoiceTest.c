@@ -479,6 +479,60 @@ static void testEncodeOptions(void)
 	ambeVoiceInit(&audio, &vocoder);
 }
 
+// C4FM's delivery: five frames per 100 ms frame, handed over at the first radio poll (every 25 ms, up to 20 ms late)
+// after the frame's end; the audio callback every 20 ms. Underruns over 10 s with the given prime wait and the polls'
+// phase (0-24 ms)
+static uint32_t burstUnderruns(uint16_t wait_ms, int phase, uint32_t *queue_max)
+{
+	const dmr_voice_sink_t *s = ambeVoiceSink();
+	uint8_t bits[49], frame[9];
+	uint32_t seed = 12345;
+	ambeVoiceSetRxPrimeWait(wait_ms);
+	ambe_voice_stats_t a, b;
+	ambeVoiceGetStats(&a);
+	s->begin(NULL, s->ctx);
+	int next_poll = phase, sent = 0;
+	for (int t = 0; t < 10000; t++) {
+		if (t == next_poll) {
+			for (; sent < 100 && 100 * sent + 100 + 3 <= t; sent++) {	// frame sent ended at 100 (sent + 1) + 3 ms
+				for (int j = 0; j < 5; j++) {
+					makeFrame(5 * sent + j, bits, frame);
+					s->frame(frame, s->ctx);
+				}
+			}
+			seed = seed * 1103515245u + 12345u;
+			next_poll = 25 * (t / 25 + 1) + (int)((seed >> 16) % 21u);
+		}
+		if (t % 20 == 11) {
+			block();
+		}
+	}
+	s->end(s->ctx);
+	for (int n = 0; n < 20; n++) {
+		block();
+	}
+	ambeVoiceGetStats(&b);
+	ambeVoiceSetRxPrimeWait(0);
+	*queue_max = b.rx_queue_max;
+	return b.rx_underruns - a.rx_underruns;
+}
+
+static void testBursts(void)
+{
+	uint32_t qmax = 0, plain = 0, waited = 0;
+	for (int phase = 0; phase < 25; phase++) {
+		uint32_t q;
+		plain += burstUnderruns(0, phase, &q);
+		waited += burstUnderruns(60, phase, &q);
+		qmax = q > qmax ? q : qmax;
+	}
+	printf("bursts of five every 100 ms, 25 poll phases: %u underruns played at once, %u with a 60 ms prime wait "
+	       "(queue max %u)\n", plain, waited, qmax);
+	CHECK(plain > 0, "bursts: playing on arrival underruns (%u)", plain);
+	CHECK(waited == 0, "bursts: a 60 ms prime wait leaves no underrun (%u)", waited);
+	CHECK(qmax < AMBE_VOICE_QUEUE, "bursts: the queue never fills (%u of %u)", qmax, AMBE_VOICE_QUEUE);
+}
+
 int main(void)
 {
 	ambeVoiceInit(&audio, &vocoder);
@@ -488,6 +542,7 @@ int main(void)
 	testFlagsMap();
 	testEncodeOptions();
 	testRepeats();
+	testBursts();
 	ambeVoiceStop();
 	CHECK(stops == 1 && !speaker_on, "stop");
 	ambeVoiceSink()->begin(NULL, NULL);

@@ -37,6 +37,7 @@
 #define C4FM_PREAMBLE_BYTES	120	// 100 ms of 0x77 before the header (receivers lock on it): the default
 #define C4FM_PREAMBLE_MAX_MS	500	// longest preamble (600 bytes: with the header it fits the modem's queue)
 #define C4FM_FT			6	// DCH cycle of seven frames
+#define C4FM_RX_PRIME_MS	60	// the voice path's prime wait in C4FM (ambeVoiceSetRxPrimeWait): over twice a poll period
 #define C4FM_TX_LOW_BYTES	120	// queue below this (100 ms of air): send the next frame, voice or not
 
 typedef enum {

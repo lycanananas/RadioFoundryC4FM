@@ -1525,6 +1525,7 @@ static void c4fm_configure(radio_sm_t *sm)
 static void c4fm_begin(radio_sm_t *sm)
 {
 	c4fm_configure(sm);
+	ambeVoiceSetRxPrimeWait(C4FM_RX_PRIME_MS);	// voice comes in bursts of five frames
 	if (!sm->c4fm_running) {
 		sm->c4fm_running = c4fm_call_start();
 	}
@@ -1537,6 +1538,7 @@ static void c4fm_end(radio_sm_t *sm)
 	c4fm_call_ptt(false);
 	c4fm_call_stop();
 	ambeVoiceStop();
+	ambeVoiceSetRxPrimeWait(0);
 	if (sm->c4fm_keyed) {
 		sm->c4fm_keyed = false;
 		board.radio->tx_off();

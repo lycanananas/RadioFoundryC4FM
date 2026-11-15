@@ -49,6 +49,8 @@ static bool cb_rx_playing, cb_rx_primed, cb_rx_live;
 static bool cb_speaker;
 static uint8_t cb_bad_run;
 static uint32_t cb_call_frames;		// frames played in this call (rx_underrun_at)
+static uint16_t rx_prime_wait_ms;	// ambeVoiceSetRxPrimeWait
+static uint16_t cb_prime_wait;		// blocks the call's first frame has waited, before playback starts
 static uint8_t last_bits[VOCODER_BITS];
 static bool have_last;
 
@@ -239,6 +241,7 @@ static void rx_block(int16_t *spk)
 		cb_rx_primed = false;
 		cb_bad_run = 0;
 		cb_call_frames = 0;
+		cb_prime_wait = 0;
 		have_last = false;
 		stats.rx_peak = 0;
 		if (voc_ok()) {
@@ -259,7 +262,11 @@ static void rx_block(int16_t *spk)
 		return;
 	}
 	if (!cb_rx_primed) {
-		if (queued >= AMBE_VOICE_PRIME || (ended && queued > 0)) {
+		bool waited = (uint32_t)cb_prime_wait * AUDIO_BLOCK_MS >= LOAD(rx_prime_wait_ms);
+		if (queued > 0 && cb_prime_wait < 0xFFFFu) {
+			cb_prime_wait++;	// counted from the block after the first frame came in
+		}
+		if ((queued >= AMBE_VOICE_PRIME && waited) || (ended && queued > 0)) {
 			cb_rx_primed = true;
 			cb_rx_playing = true;
 			stats.rx_calls++;
@@ -482,6 +489,11 @@ void ambeVoiceSetRxGain(int8_t db)
 	static const uint16_t q8[10] = { 128, 161, 203, 256, 322, 406, 511, 643, 810, 1020 };	// -6 .. +12 dB
 	int i = (db < -6 ? -6 : db > 12 ? 12 : db) / 2 + 3;
 	STORE(rx_gain_q8, q8[i]);
+}
+
+void ambeVoiceSetRxPrimeWait(uint16_t ms)
+{
+	STORE(rx_prime_wait_ms, ms);
 }
 
 void ambeVoiceSetEncodeOptions(uint32_t opts)

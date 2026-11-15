@@ -28,8 +28,8 @@
 #include "hal_vocoder.h"
 #include "dmr/call/dmr_call.h"
 
-#define AMBE_VOICE_QUEUE	8	// frames each way (160 ms), power of two
-#define AMBE_VOICE_PRIME	3	// frames queued before RX playback starts
+#define AMBE_VOICE_QUEUE	16	// frames each way (320 ms), power of two: room for a prime wait and a burst of five
+#define AMBE_VOICE_PRIME	3	// frames queued before RX playback starts (and the prime wait, ambeVoiceSetRxPrimeWait)
 #define AMBE_VOICE_REPEAT	3	// bad / missing frames concealed by repeating the last good one, then silence
 
 typedef struct {
@@ -85,6 +85,11 @@ void ambeVoiceSetMicGain(uint8_t step);
 // Decoded voice level (Settings > C4FM > Voice volume; C4FM and DMR): -6..+12 dB in 2 dB steps, 0 = as decoded, with
 // saturation. Any task
 void ambeVoiceSetRxGain(int8_t db);
+// How long a call's first frame waits before playback starts (0 = at once, the default), as a margin for a stack that
+// hands its frames over in bursts at an uneven time: C4FM delivers five frames per 100 ms frame, when a poll (every
+// 25 ms) reads the frame's end, and playing them on arrival left the queue empty whenever the next burst came a poll
+// late (an underrun: a repeated 20 ms). Rounded up to audio blocks. Any task; read at each call's start
+void ambeVoiceSetRxPrimeWait(uint16_t ms);
 // Test signal for DMR transmissions (the debug link's RADIO op 33, RAM only): on, the encoder gets a generated tone
 // that changes pitch every 60 ms in place of the mic, so an over carries known, varying audio whatever the mic hears
 // (the HIL audio smoke test). Any task

@@ -136,7 +136,7 @@ The modulator (RRC at 24 kHz, decimated to 8 kHz) serves the host tests.
 | Phase | Transmit | Receive |
 |---|---|---|
 | Start | 100 ms of `0x77` (+3 -3 ...), header (CSD1 `*****` + radio ID / our callsign) | a header, or a communications frame whose FICH decodes (late entry) |
-| Voice | a frame per five voice frames; DCH cycling by FN | DN: DCH by FN (FN 1 the caller's callsign), five AMBE frames to the voice path. Another DT: shown, not played. |
+| Voice | a frame per five voice frames; DCH cycling by FN | DN: DCH by FN (FN 1 the caller's callsign), five AMBE frames to the voice path. Another DT: shown, not played. Playback starts 60 ms after the call's first frames (`ambeVoiceSetRxPrimeWait`): the five come at once, at the first poll (every 25 ms) after the frame's end, and played on arrival the queue ran dry whenever a frame came a poll late (a repeated 20 ms each time) |
 | Gaps | the modem kept 100-200 ms ahead; a frame still short of voice when the modem runs low is padded with silence | a frame whose FICH fails inside a call is taken as the communications frame due |
 | End | PTT up: the voice left (padded), the terminator, unkey once it has played out | the terminator, a lost signal, or 400 ms without a frame |
 
