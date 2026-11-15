@@ -11,6 +11,8 @@
  * least squares fit of the sync's sampled values to its known levels, so a negative gain (an inverted discriminator)
  * needs no special case. Locked, the next sync is looked for within +-2 samples of where it is due and the levels are
  * refit; a missed sync is bridged on the old timing up to C4FM_MAX_MISSES times, then the receiver searches again.
+ * A first lock is tentative until its second sync: meanwhile a clean sync elsewhere takes over (receiver noise
+ * passes a first lock every few minutes).
  *
  * Integer only (no FPU on the target). No RTOS calls: the caller feeds samples and gets frames by callback.
  */
@@ -54,6 +56,7 @@ typedef struct {
 	uint32_t n;		// 24 kHz sample counter (index of the newest y)
 
 	bool locked;
+	bool confirmed;		// the lock's second sync seen (a first lock alone is tentative: c4fm_dsp.c LOCK_SURE_ERRS)
 	// search: candidate peak
 	bool cand;
 	uint32_t cand_n, cand_until;

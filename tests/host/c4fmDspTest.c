@@ -113,6 +113,8 @@ static bool tone_on;
 static uint16_t tone_found;
 // The equalizer's center tap at the start (0 = as set up): a state left over from an earlier signal
 static int32_t eq_stale_center;
+// A noise lock just before the transmission: a sync with 3 bit errors and 40 ms of random symbols
+static bool fake_lock;
 
 static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_samples)
 {
@@ -122,6 +124,18 @@ static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_sampl
 	uint32_t n = 0;
 	for (unsigned i = 0; i < lead_samples; i++) {
 		audio[n++] = 0;
+	}
+	if (fake_lock) {
+		uint8_t fake[5 + 24];
+		memset(fake, 0, sizeof fake);
+		ysfAddSync(fake);
+		fake[0] ^= 0x40;
+		fake[2] ^= 0x10;
+		fake[4] ^= 0x04;
+		for (unsigned i = 5; i < sizeof fake; i++) {
+			fake[i] = (uint8_t)rnd();
+		}
+		n += c4fmModulate(&m, fake, sizeof fake * 8, &audio[n]);
 	}
 	uint8_t pre[PREAMBLE];
 	memset(pre, 0x77, sizeof pre);
@@ -262,6 +276,14 @@ int main(void)
 		CHECK(z.fich_ok == 0, "noise only: %d frames, %d with a good FICH", z.got, z.fich_ok);
 		printf("noise only (10 s): %d false frames\n", z.got);
 	}
+	// A transmission starting 40 ms into a noise lock (a sync with 3 bit errors; receiver noise passes a first lock
+	// every few minutes, SR5WI 2026-11-15): its clean sync takes over and frame 0 is received. The lock used to hold
+	// the receiver for 400 ms (3 flywheel frames) and the header went by
+	fake_lock = true;
+	r = run(2000, 0, false, 200, 3);
+	fake_lock = false;
+	CHECK(r.got == NFRAMES && r.fich_ok == NFRAMES, "start during a noise lock: %d of %d frames, %d FICH ok", r.got,
+	      NFRAMES, r.fich_ok);
 
 	printf("c4fmDspTest: %d checks, %d failures\n", checks, failures);
 	return failures ? 1 : 0;

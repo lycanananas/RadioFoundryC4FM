@@ -26,6 +26,14 @@ static const int16_t rrc_tx[NTAPS] = {
 #define FRAME_SAMPLES	(YSF_FRAME_SYMBOLS * C4FM_SPS)		// 2400
 #define SEARCH		2					// +- samples around a due sync
 #define LOCK_MAX_ERRS	4					// sync bit errors accepted for a first lock
+// A first lock is tentative until the next sync turns up where it is due: meanwhile a sync with at most LOCK_SURE_ERRS
+// errors elsewhere takes over. Receiver noise passes LOCK_MAX_ERRS every 3-5 minutes (SR5WI, 2026-11-15: 45 in 3 h),
+// and a noise lock held the receiver for 400 ms (the lock and 3 flywheel frames) where a real transmission's start
+// went by. Not a stricter first lock: 3 errors cost a low-passed channel half its frames, and such noise correlates
+// over 0.75-1 like a weak signal. Not an end at the first missed sync either: a weak signal (a bench capture) loses
+// its second sync, then tracks at 6-10 sync errors that a new first lock would never take. Noise passes
+// LOCK_SURE_ERRS twice in 10 h simulated
+#define LOCK_SURE_ERRS	2
 
 // Sync levels and the correlation constants derived from them (filled once)
 static int8_t sync_lv[SYNC_SYMS];
@@ -385,7 +393,8 @@ static void eqIdentity(c4fm_demod_t *d)
 	d->eq_w[d->eq_taps / 2u] = 1 << 28;
 }
 
-static void search(c4fm_demod_t *d)
+// tentative: a first lock is waiting for its next sync; only a sure sync away from that lock's timing replaces it
+static void search(c4fm_demod_t *d, bool tentative)
 {
 	int64_t c, e;
 	int32_t sx;
@@ -405,15 +414,28 @@ static void search(c4fm_demod_t *d)
 	}
 	if (d->cand && d->n == d->cand_until) {
 		d->cand = false;
+		if (tentative) {
+			// Not the lock's own sync (the tail of its peak) nor its next one (locked() takes that)
+			uint32_t off = d->cand_n - d->sync_end;
+			if (off <= SEARCH + C4FM_SPS ||
+			    (off + SEARCH + C4FM_SPS >= FRAME_SAMPLES && off <= FRAME_SAMPLES + SEARCH + C4FM_SPS)) {
+				return;
+			}
+		}
+		int32_t g = d->gain16, ctr = d->center;
 		correlate(d, d->cand_n, &c, &e, &sx);
 		fit(d, c, sx);
-		if (d->gain16 != 0 && syncErrors(d, d->cand_n) <= LOCK_MAX_ERRS) {
+		if (d->gain16 != 0 && syncErrors(d, d->cand_n) <= (tentative ? LOCK_SURE_ERRS : LOCK_MAX_ERRS)) {
 			d->locked = true;
+			d->confirmed = false;
 			d->misses = 0;
 			d->syncs++;
 			eqIdentity(d);	// a new signal: nothing learned from the last one carries over
 			toneRestart(d);
 			startFrame(d, d->cand_n, false);
+		} else if (tentative) {
+			d->gain16 = g;	// keep the lock's levels
+			d->center = ctr;
 		}
 	}
 }
@@ -536,11 +558,14 @@ static void locked(c4fm_demod_t *d)
 		fit(d, bc, bsx);
 		d->misses = 0;
 		d->syncs++;
+		d->confirmed = true;
+		d->cand = false;	// a candidate the tentative search had open would be stale by the next search
 		startFrame(d, bn, false);
 		return;
 	}
 	if (++d->misses > C4FM_MAX_MISSES) {
 		d->locked = false;
+		d->cand = false;
 		d->losts++;
 		if (d->on_lost != NULL) {
 			d->on_lost(d->ctx);
@@ -594,10 +619,13 @@ void c4fmDemodFeed(c4fm_demod_t *d, const int16_t *pcm8k, uint32_t count)
 			}
 			d->n++;
 			d->y[d->n & (C4FM_RING - 1u)] = (int16_t)acc;
-			if (d->locked) {
-				locked(d);
+			if (!d->locked) {
+				search(d, false);
 			} else {
-				search(d);
+				locked(d);
+				if (d->locked && !d->confirmed) {
+					search(d, true);
+				}
 			}
 		}
 	}
