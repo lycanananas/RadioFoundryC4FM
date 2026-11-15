@@ -87,8 +87,8 @@ one): the same across restarts, different between radios. Received, the caller's
 | First lock | at most 4 of the 40 sync bits wrong |
 | Tracking | the next sync is looked for within +-2 samples of where it is due, above 0.5 of the ideal and within 6 dB of the last level |
 | Loss | a missed sync is bridged on the old timing (flywheel frame) up to 3 times, then the receiver searches again |
-| Tone filter | some repeaters send a CTCSS tone under the 4FSK. The data symbols' slicing errors run through a Goertzel filter per standard tone (50, 67.0-254.1 Hz) over blocks of 4 frames (2.5 Hz resolution; syncs and flywheel frames as zeros); a tone 6 times above the mean of the others (its neighbors left out) selects a notch (Q 20) on the 8 kHz input; a neighbor of the tone in use takes over only at twice its power. The tone is kept from call to call. Always on (debug link SETTING 43 turns it off for an A/B) |
-| Equalizer | 7 taps a symbol apart around each data symbol, decision-directed normalized LMS (step 2^-6) towards the decided level, DC left out; not adapted on flywheel frames, reset to a pass-through if it runs away. Always on (debug link SETTING 42 turns it off for an A/B) |
+| Tone filter | some repeaters send a CTCSS tone under the 4FSK. Each data symbol's slicing error less the one a frame earlier at the same place (what repeats every frame is a comb at multiples of 10 Hz, not a tone) runs through a Goertzel filter per standard tone (50, 67.0-254.1 Hz) over blocks of 4 frames (2.5 Hz resolution; syncs and flywheel frames as zeros; each bin weighted for the difference's gain on noise there); a tone 6 times above the mean of the others (its neighbors left out) in two blocks running selects a notch (Q 20) on the 8 kHz input; a neighbor of the tone in use takes over only at twice its power. Every new lock starts with no tone. Always on (debug link SETTING 43 turns it off for an A/B) |
+| Equalizer | 7 taps a symbol apart around each data symbol, decision-directed normalized LMS (step 2^-6) towards the decided level, DC left out; the center tap held within 0.7-1.2, a side tap past 0.5 resets it to a pass-through; not adapted on flywheel frames; every new lock starts from a pass-through. Always on (debug link SETTING 42 turns it off for an A/B) |
 
 Integer arithmetic only. About 14 multiply-adds per 24 kHz sample for the filter, 20 more while searching.
 `c4fmDspTest.c`: frames bit exact through timing offsets, DC, inversion, a 300-unit level; the FICH survives noise at
@@ -105,9 +105,20 @@ sampling instant does not drift inside a frame.
 The tone filter: SR5WI sends 127.3 Hz under its C4FM (the slicing error's spectrum has a line there, up to 49 times
 the floor, on every capture through it; none on a direct one). Yaesu receivers ignore it; this receiver took it for
 level errors. On the ten voice captures (`c4fmReplay --tone --eq 7,5,6`, the tone found in each within the 2 s) the
-voice BER drops from 5.6 % to 2.2 %; with the notch from the first frame (the radio keeps the tone for the next call)
-to 1.7 %. A notch on a signal without a tone costs about 1 % BER alone and nothing with the equalizer on, so a wrong
-pick is cheap. `c4fmDspTest` checks that a 127.3 Hz tone of 0.4 of a level is found and that none is picked without one.
+voice BER drops from 5.6 % to 2.2 % with the first version (a tone from one block, kept from call to call); with a
+notch from the first frame, to 1.7 %. That version failed on the bench (2026-11-15): a direct signal sending the same
+voice frame over and over (silence) leaves a comb of lines at multiples of 10 Hz in the errors, which the 2.5 Hz bins
+took for 131.8 / 199.5 Hz; and a notch, once in, cuts its band out of the signal, which the errors show as its tone,
+so a wrong pick stayed until a restart. Now the errors are differenced frame to frame, a tone has to win two blocks,
+and each lock starts afresh: the 2 s captures through SR5WI come to 1.6 % (the tone is notched from about 0.8 s on),
+no tone is found on the direct ones. A tone within about 1 Hz of a multiple of 10 Hz (100.0, 179.9, 189.9, 199.5 Hz)
+is differenced away as well and is not found. `c4fmDspTest` checks that a 127.3 Hz tone of 0.4 of a level is found
+and that none is picked without one.
+
+The equalizer's gain is the sync fit's: with a free center tap it had a second resting point near 0.4, where the
+outer levels fall on the inner ones, every decision is +-1 and the updates hold it there. A radio on the bench sat at
+0.355 and decoded no FICH, from the strongest signal, until a restart (nothing reset the weights but a transmission).
+`c4fmDspTest` starts it at 0.38 and expects a clean decode.
 
 Soft decisions: with each frame the receiver hands over a soft value per bit (`c4fm_frame_info_t.soft`: the
 sample's distance from the decision threshold, 32 to a level unit; the dibit's MSB is -z, its LSB |z| - 2). The
@@ -125,7 +136,7 @@ The modulator (RRC at 24 kHz, decimated to 8 kHz) serves the host tests.
 | Phase | Transmit | Receive |
 |---|---|---|
 | Start | 100 ms of `0x77` (+3 -3 ...), header (CSD1 `*****` + radio ID / our callsign) | a header, or a communications frame whose FICH decodes (late entry) |
-| Voice | a frame per five voice frames; DCH cycling by FN | DN: DCH by FN (FN 1 the caller's callsign), five AMBE frames to the voice path. Another DT: shown, not played |
+| Voice | a frame per five voice frames; DCH cycling by FN | DN: DCH by FN (FN 1 the caller's callsign), five AMBE frames to the voice path. Another DT: shown, not played. |
 | Gaps | the modem kept 100-200 ms ahead; a frame still short of voice when the modem runs low is padded with silence | a frame whose FICH fails inside a call is taken as the communications frame due |
 | End | PTT up: the voice left (padded), the terminator, unkey once it has played out | the terminator, a lost signal, or 400 ms without a frame |
 

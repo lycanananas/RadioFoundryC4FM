@@ -163,62 +163,65 @@ static unsigned syncErrors(const c4fm_demod_t *d, uint32_t n)
 // --- tone filter ---
 
 // The standard CTCSS tones: tenths of Hz, the Goertzel coefficient at the symbol rate (2 cos(2 pi f / 4800), Q14),
-// and the input notch at 8 kHz (Q 20; b0 = b2, a1 = b1; Q29), generated with scipy.signal.iirnotch
+// the input notch at 8 kHz (Q 20; b0 = b2, a1 = b1; Q29), generated with scipy.signal.iirnotch, and the power
+// weight that undoes the frame difference's gain on noise there (256 / max(4 sin^2(pi f 0.1 s), 1): near a multiple
+// of 10 Hz the difference leaves little of anything, and those bins keep their power as it is)
 static const struct {
 	uint16_t hz10;
 	int16_t g;
 	int32_t b0, b1, a2;
+	uint16_t w;
 } tones[C4FM_TONES] = {
-	{ 670, 32642, 536165563, -1070846805, 535460215 },
-	{ 693, 32633, 536141383, -1070694883, 535411853 },
-	{ 719, 32623, 536114051, -1070518955, 535357190 },
-	{ 744, 32613, 536087773, -1070345601, 535304633 },
-	{ 770, 32602, 536060446, -1070160953, 535249980 },
-	{ 797, 32590, 536032072, -1069964501, 535193231 },
-	{ 825, 32577, 536002649, -1069755712, 535134387 },
-	{ 854, 32563, 535972180, -1069534038, 535073447 },
-	{ 885, 32548, 535939612, -1069290968, 535008313 },
-	{ 915, 32533, 535908099, -1069049733, 534945287 },
-	{ 948, 32516, 535873439, -1068777552, 534875967 },
-	{ 974, 32502, 535846135, -1068558075, 534821357 },
-	{ 1000, 32488, 535818833, -1068334164, 534766754 },
-	{ 1035, 32468, 535782085, -1068025748, 534693257 },
-	{ 1072, 32446, 535743242, -1067690980, 534615572 },
-	{ 1109, 32423, 535704405, -1067347244, 534537898 },
-	{ 1148, 32399, 535663475, -1066975226, 534456038 },
-	{ 1188, 32373, 535621502, -1066583329, 534372091 },
-	{ 1230, 32344, 535577437, -1066160575, 534283962 },
-	{ 1273, 32314, 535532330, -1065715810, 534193749 },
-	{ 1318, 32282, 535485134, -1065237423, 534099356 },
-	{ 1365, 32246, 535435849, -1064723660, 534000786 },
-	{ 1413, 32209, 535385524, -1064184090, 533900137 },
-	{ 1462, 32170, 535334161, -1063617785, 533797411 },
-	{ 1514, 32127, 535279664, -1062999700, 533688417 },
-	{ 1567, 32081, 535224131, -1062351614, 533577349 },
-	{ 1598, 32054, 535191654, -1061964076, 533512396 },
-	{ 1622, 32032, 535166514, -1061659755, 533462115 },
-	{ 1655, 32002, 535131949, -1061235201, 533392986 },
-	{ 1679, 31980, 535106814, -1060921992, 533342717 },
-	{ 1713, 31948, 535071211, -1060471877, 533271509 },
-	{ 1738, 31924, 535045034, -1060136125, 533219157 },
-	{ 1773, 31889, 535008392, -1059659260, 533145872 },
-	{ 1799, 31864, 534981175, -1059299877, 533091438 },
-	{ 1835, 31827, 534943495, -1058795038, 533016077 },
-	{ 1862, 31799, 534915238, -1058410901, 532959564 },
-	{ 1899, 31761, 534876521, -1057876827, 532882129 },
-	{ 1928, 31730, 534846178, -1057452038, 532821445 },
-	{ 1966, 31689, 534806425, -1056887189, 532741938 },
-	{ 1995, 31657, 534776091, -1056449842, 532681269 },
-	{ 2035, 31612, 534734256, -1055837695, 532597600 },
-	{ 2065, 31578, 534702884, -1055371809, 532534856 },
-	{ 2107, 31530, 534658970, -1054709818, 532447028 },
-	{ 2181, 31442, 534581615, -1053515802, 532292317 },
-	{ 2257, 31348, 534502192, -1052252839, 532133471 },
-	{ 2291, 31306, 534466668, -1051675811, 532062424 },
-	{ 2336, 31248, 534419659, -1050900686, 531968405 },
-	{ 2418, 31140, 534334018, -1049454844, 531797125 },
-	{ 2503, 31025, 534245274, -1047910656, 531619635 },
-	{ 2541, 30972, 534205609, -1047205370, 531540306 },
+	{ 670, 32642, 536165563, -1070846805, 535460215, 98 },
+	{ 693, 32633, 536141383, -1070694883, 535411853, 256 },
+	{ 719, 32623, 536114051, -1070518955, 535357190, 203 },
+	{ 744, 32613, 536087773, -1070345601, 535304633, 66 },
+	{ 770, 32602, 536060446, -1070160953, 535249980, 98 },
+	{ 797, 32590, 536032072, -1069964501, 535193231, 256 },
+	{ 825, 32577, 536002649, -1069755712, 535134387, 128 },
+	{ 854, 32563, 535972180, -1069534038, 535073447, 65 },
+	{ 885, 32548, 535939612, -1069290968, 535008313, 256 },
+	{ 915, 32533, 535908099, -1069049733, 534945287, 256 },
+	{ 948, 32516, 535873439, -1068777552, 534875967, 64 },
+	{ 974, 32502, 535846135, -1068558075, 534821357, 120 },
+	{ 1000, 32488, 535818833, -1068334164, 534766754, 256 },
+	{ 1035, 32468, 535782085, -1068025748, 534693257, 81 },
+	{ 1072, 32446, 535743242, -1067690980, 534615572, 108 },
+	{ 1109, 32423, 535704405, -1067347244, 534537898, 256 },
+	{ 1148, 32399, 535663475, -1066975226, 534456038, 64 },
+	{ 1188, 32373, 535621502, -1066583329, 534372091, 256 },
+	{ 1230, 32344, 535577437, -1066160575, 534283962, 98 },
+	{ 1273, 32314, 535532330, -1065715810, 534193749, 114 },
+	{ 1318, 32282, 535485134, -1065237423, 534099356, 223 },
+	{ 1365, 32246, 535435849, -1064723660, 534000786, 81 },
+	{ 1413, 32209, 535385524, -1064184090, 533900137, 256 },
+	{ 1462, 32170, 535334161, -1063617785, 533797411, 74 },
+	{ 1514, 32127, 535279664, -1062999700, 533688417, 256 },
+	{ 1567, 32081, 535224131, -1062351614, 533577349, 86 },
+	{ 1598, 32054, 535191654, -1061964076, 533512396, 256 },
+	{ 1622, 32032, 535166514, -1061659755, 533462115, 158 },
+	{ 1655, 32002, 535131949, -1061235201, 533392986, 66 },
+	{ 1679, 31980, 535106814, -1060921992, 533342717, 170 },
+	{ 1713, 31948, 535071211, -1060471877, 533271509, 256 },
+	{ 1738, 31924, 535045034, -1060136125, 533219157, 74 },
+	{ 1773, 31889, 535008392, -1059659260, 533145872, 114 },
+	{ 1799, 31864, 534981175, -1059299877, 533091438, 256 },
+	{ 1835, 31827, 534943495, -1058795038, 533016077, 81 },
+	{ 1862, 31799, 534915238, -1058410901, 532959564, 74 },
+	{ 1899, 31761, 534876521, -1057876827, 532882129, 256 },
+	{ 1928, 31730, 534846178, -1057452038, 532821445, 108 },
+	{ 1966, 31689, 534806425, -1056887189, 532741938, 83 },
+	{ 1995, 31657, 534776091, -1056449842, 532681269, 256 },
+	{ 2035, 31612, 534734256, -1055837695, 532597600, 81 },
+	{ 2065, 31578, 534702884, -1055371809, 532534856, 81 },
+	{ 2107, 31530, 534658970, -1054709818, 532447028, 256 },
+	{ 2181, 31442, 534581615, -1053515802, 532292317, 203 },
+	{ 2257, 31348, 534502192, -1052252839, 532133471, 67 },
+	{ 2291, 31306, 534466668, -1051675811, 532062424, 256 },
+	{ 2336, 31248, 534419659, -1050900686, 531968405, 78 },
+	{ 2418, 31140, 534334018, -1049454844, 531797125, 223 },
+	{ 2503, 31025, 534245274, -1047910656, 531619635, 256 },
+	{ 2541, 30972, 534205609, -1047205370, 531540306, 69 },
 };
 
 // The Goertzel filters run over TONE_BLOCK frames in symbol time (the syncs and flywheel frames as zeros, so the
@@ -276,24 +279,29 @@ static void toneFrameStart(c4fm_demod_t *d)
 	}
 }
 
-// One data symbol's slicing error (64 to a level unit) into every tone's Goertzel filter (zero on a flywheel frame)
+// One data symbol's slicing error (64 to a level unit) less the previous frame's at the same place, into every tone's
+// Goertzel filter (zero on a flywheel frame and on the first frame after a lock or a flywheel: no reference)
 static void toneSymbol(c4fm_demod_t *d, int32_t y, uint8_t dibit)
 {
 	if (!d->tone_on) {
 		return;
 	}
-	int32_t e = 0;
+	int32_t e = 0, q = 0;
 	if (!d->flywheel && d->gain16 != 0) {
 		int32_t want = d->center + (int32_t)(c4fmLevel(dibit) * (d->gain16 / 16));
 		e = (int32_t)(((int64_t)(y - want) * 64 * 16) / d->gain16);
-		e = e > 255 ? 255 : e < -255 ? -255 : e;
+		q = e / 2;
+		q = q > 127 ? 127 : q < -127 ? -127 : q;
 	}
-	toneStep(d, e);
+	int32_t diff = d->tone_prev_ok && !d->flywheel ? 2 * (q - d->tone_prev[d->sym]) : 0;
+	d->tone_prev[d->sym] = (int8_t)q;
+	toneStep(d, diff);
 }
 
 // Every TONE_BLOCK frames: the block's tone powers into the leaky sums; a tone well above the others becomes the notch
 static void toneFrameEnd(c4fm_demod_t *d)
 {
+	d->tone_prev_ok = !d->flywheel;
 	if (!d->tone_on || ++d->tone_frames % TONE_BLOCK != 0) {
 		return;
 	}
@@ -302,7 +310,8 @@ static void toneFrameEnd(c4fm_demod_t *d)
 	for (unsigned k = 0; k < C4FM_TONES; k++) {
 		int64_t s1 = d->g_s1[k], s2 = d->g_s2[k];
 		int64_t pw = s1 * s1 + s2 * s2 - ((tones[k].g * s1 * s2) >> 14);
-		d->g_acc[k] += (pw < 0 ? 0 : pw) - d->g_acc[k] / 4;
+		pw = pw < 0 ? 0 : (pw >> 8) * tones[k].w;
+		d->g_acc[k] += pw - d->g_acc[k] / 4;
 		total += d->g_acc[k];
 		if (d->g_acc[k] > d->g_acc[best]) {
 			best = k;
@@ -311,6 +320,7 @@ static void toneFrameEnd(c4fm_demod_t *d)
 	memset(d->g_s1, 0, sizeof d->g_s1);
 	memset(d->g_s2, 0, sizeof d->g_s2);
 	if (d->tone_sel == best + 1u) {
+		d->tone_cand = 0;
 		return;
 	}
 	int64_t rest = total;
@@ -324,13 +334,34 @@ static void toneFrameEnd(c4fm_demod_t *d)
 	if (d->tone_sel != 0) {
 		unsigned cur = d->tone_sel - 1u;
 		if ((best + 1u == cur || cur + 1u == best) && d->g_acc[best] < 2 * d->g_acc[cur]) {
+			d->tone_cand = 0;
 			return;
 		}
 	}
-	if (rest > 0 && d->g_acc[best] * n >= (int64_t)TONE_RATIO * rest) {
-		d->tone_sel = (uint8_t)(best + 1u);
-		d->nx1 = d->nx2 = d->ny1 = d->ny2 = 0;
+	if (rest <= 0 || d->g_acc[best] * n < (int64_t)TONE_RATIO * rest) {
+		d->tone_cand = 0;
+		return;
 	}
+	// One block's winner can be noise (the bench's test signal picked 67 Hz from one block); the second block in a row
+	// confirms it
+	if (d->tone_cand != best + 1u) {
+		d->tone_cand = (uint8_t)(best + 1u);
+		return;
+	}
+	d->tone_cand = 0;
+	d->tone_sel = (uint8_t)(best + 1u);
+	d->nx1 = d->nx2 = d->ny1 = d->ny2 = 0;
+}
+
+// A new signal: no tone, nothing learned (toneFrameEnd: why a choice can't be carried over)
+static void toneRestart(c4fm_demod_t *d)
+{
+	d->tone_sel = d->tone_cand = d->tone_frames = 0;
+	d->tone_prev_ok = false;
+	d->nx1 = d->nx2 = d->ny1 = d->ny2 = 0;
+	memset(d->g_s1, 0, sizeof d->g_s1);
+	memset(d->g_s2, 0, sizeof d->g_s2);
+	memset(d->g_acc, 0, sizeof d->g_acc);
 }
 
 static void startFrame(c4fm_demod_t *d, uint32_t sync_end, bool flywheel)
@@ -346,6 +377,12 @@ static void startFrame(c4fm_demod_t *d, uint32_t sync_end, bool flywheel)
 	d->info.gain = (int16_t)(d->gain16 / 16);
 	d->info.center = (int16_t)d->center;
 	toneFrameStart(d);
+}
+
+static void eqIdentity(c4fm_demod_t *d)
+{
+	memset(d->eq_w, 0, sizeof d->eq_w);
+	d->eq_w[d->eq_taps / 2u] = 1 << 28;
 }
 
 static void search(c4fm_demod_t *d)
@@ -374,18 +411,14 @@ static void search(c4fm_demod_t *d)
 			d->locked = true;
 			d->misses = 0;
 			d->syncs++;
+			eqIdentity(d);	// a new signal: nothing learned from the last one carries over
+			toneRestart(d);
 			startFrame(d, d->cand_n, false);
 		}
 	}
 }
 
 // --- equalizer ---
-
-static void eqIdentity(c4fm_demod_t *d)
-{
-	memset(d->eq_w, 0, sizeof d->eq_w);
-	d->eq_w[d->eq_taps / 2u] = 1 << 28;
-}
 
 void c4fmDemodSetEq(c4fm_demod_t *d, uint8_t taps, uint8_t step, uint8_t mu)
 {
@@ -414,8 +447,13 @@ static int32_t equalize(const c4fm_demod_t *d, uint32_t m)
 }
 
 // Normalized LMS towards the decided level: w += e x / (taps P) / 2^mu, P the signal's power at this gain (the four
-// levels' mean square is 5). Not on flywheel frames (the decisions are guesses), and back to a plain pass-through if
-// the weights run away
+// levels' mean square is 5). The center tap stays at 1: the sync's fit already sets the gain, and a free center tap
+// has a second resting point near 0.4 where the outer levels fall on the inner ones, every decision is +-1 and the
+// updates keep it there (the bench: a radio stuck at 0.355, no FICH until a restart). Not on flywheel frames (the
+// decisions are guesses); back to a plain pass-through if a side tap runs away
+#define EQ_CENTER_MIN	((7 << 28) / 10)
+#define EQ_CENTER_MAX	((6 << 28) / 5)
+#define EQ_SIDE_MAX	(1 << 27)	// 0.5: the repeater chains seen need under 0.15
 static void adapt(c4fm_demod_t *d, uint32_t m, int32_t y, uint8_t dibit)
 {
 	if (d->eq_taps == 0 || d->flywheel || d->gain16 == 0) {
@@ -429,16 +467,17 @@ static void adapt(c4fm_demod_t *d, uint32_t m, int32_t y, uint8_t dibit)
 	}
 	int64_t sc = ((int64_t)(want - y) << (36 - d->eq_mu)) / den;	// Q36 per sample unit
 	uint32_t first = m - (uint32_t)(d->eq_taps / 2u) * d->eq_step;
-	bool bad = false;
 	for (unsigned k = 0; k < d->eq_taps; k++) {
 		int64_t w = d->eq_w[k] + ((sc * (ysamp(d, first + k * d->eq_step) - d->center)) >> 8);
-		if (w > (6ll << 28) || w < -(6ll << 28)) {
-			bad = true;
+		if (k == d->eq_taps / 2u) {
+			d->eq_w[k] = (int32_t)(w < EQ_CENTER_MIN ? EQ_CENTER_MIN : w > EQ_CENTER_MAX ? EQ_CENTER_MAX : w);
+			continue;
 		}
-		d->eq_w[k] = (int32_t)(w > INT32_MAX ? INT32_MAX : w < INT32_MIN ? INT32_MIN : w);
-	}
-	if (bad || d->eq_w[d->eq_taps / 2u] < (1 << 26)) {
-		eqIdentity(d);
+		if (w > EQ_SIDE_MAX || w < -EQ_SIDE_MAX) {
+			eqIdentity(d);
+			return;
+		}
+		d->eq_w[k] = (int32_t)w;
 	}
 }
 
@@ -516,7 +555,7 @@ void c4fmDemodReset(c4fm_demod_t *d)
 	c4fm_frame_cb_t f = d->on_frame;
 	c4fm_lost_cb_t l = d->on_lost;
 	void *ctx = d->ctx;
-	uint8_t taps = d->eq_taps, step = d->eq_step, mu = d->eq_mu, tone = d->tone_sel;
+	uint8_t taps = d->eq_taps, step = d->eq_step, mu = d->eq_mu;
 	bool tone_on = d->tone_on;
 	memset(d, 0, sizeof *d);
 	d->on_frame = f;
@@ -524,7 +563,6 @@ void c4fmDemodReset(c4fm_demod_t *d)
 	d->ctx = ctx;
 	c4fmDemodSetEq(d, taps, step, mu);
 	c4fmDemodSetToneFilter(d, tone_on);
-	d->tone_sel = tone_on ? tone : 0;	// a repeater keeps its tone from one call to the next
 	d->n = 0xFFFFFFFFu;	// the first sample is n = 0
 }
 

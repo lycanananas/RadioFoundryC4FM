@@ -111,6 +111,8 @@ static int chan_lp;
 static int chan_tone;
 static bool tone_on;
 static uint16_t tone_found;
+// The equalizer's center tap at the start (0 = as set up): a state left over from an earlier signal
+static int32_t eq_stale_center;
 
 static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_samples)
 {
@@ -153,6 +155,9 @@ static rx_t run(int amp, int dc, bool invert, int noise_rms, unsigned lead_sampl
 	c4fmDemodInit(&d, onFrame, onLost, &r);
 	c4fmDemodSetEq(&d, eq_on ? 7 : 0, 5, 6);
 	c4fmDemodSetToneFilter(&d, tone_on);
+	if (eq_stale_center != 0 && d.eq_taps != 0) {
+		d.eq_w[d.eq_taps / 2u] = eq_stale_center;
+	}
 	for (uint32_t i = 0; i < n; i += 256) {
 		c4fmDemodFeed(&d, &audio[i], n - i < 256 ? n - i : 256);
 	}
@@ -213,6 +218,13 @@ int main(void)
 	      "equalizer halves the bit errors on a low-passed channel (%u plain, %u equalized)", plain.bit_errors,
 	      r.bit_errors);
 	chan_lp = 0;
+	// A center tap left near 0.4 (bench, 2026-11-15: a radio stuck at 0.355 decoded no FICH until a restart; there
+	// every decision is +-1 and the updates keep it): a new signal starts from a plain pass-through
+	eq_stale_center = (int32_t)(0.38 * (1 << 28));
+	r = run(2000, 0, false, 300, 3);
+	CHECK(r.got == NFRAMES && r.fich_ok == NFRAMES && r.bit_errors < 20,
+	      "equalizer, stale center tap 0.38: %d frames, %d FICH ok, %u bit errors", r.got, r.fich_ok, r.bit_errors);
+	eq_stale_center = 0;
 	eq_on = false;
 
 	// The tone filter (bench: SR5WI sends 127.3 Hz under its C4FM, 2026-11-14): it finds a tone of 0.4 of a level
@@ -229,7 +241,7 @@ int main(void)
 	printf("127.3 Hz tone: %u bit errors plain, %u with the tone filter (found %u.%u Hz)\n", plain.bit_errors,
 	       r.bit_errors, tone_found / 10u, tone_found % 10u);
 	CHECK(tone_found == 1273, "tone filter finds 127.3 Hz (%u)", tone_found);
-	// The first block of frames still carries the tone's errors (the radio keeps the tone for the next call)
+	// The first two blocks of frames still carry the tone's errors (a tone is confirmed over two, found anew each lock)
 	CHECK(plain.bit_errors > 0 && r.bit_errors * 3 < plain.bit_errors * 2,
 	      "tone filter takes out a third of the bit errors or more (%u plain, %u filtered)", plain.bit_errors,
 	      r.bit_errors);

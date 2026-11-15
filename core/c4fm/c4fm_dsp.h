@@ -72,10 +72,16 @@ typedef struct {
 	int32_t eq_w[C4FM_EQ_MAX];
 	// Tone filter (c4fmDemodSetToneFilter): some repeaters send a CTCSS tone under the 4FSK, which the receiver takes
 	// for level errors. The data symbols' slicing errors go through a Goertzel filter per standard tone each frame;
-	// a tone well above the rest selects a notch on the input. tone_sel: 1 + the tone's index, 0 none; tone_frames
-	// counts frames into the Goertzel block
-	bool tone_on;
-	uint8_t tone_sel, tone_frames;
+	// a tone well above the rest in two blocks running selects a notch on the input. Once in, the notch's own cut
+	// out of the signal looks like its tone in the errors, so a choice never clears itself: each new lock starts
+	// with none (a repeater's tone is found again in 0.8 s). tone_sel: 1 + the tone's index, 0 none; tone_cand: the
+	// last block's winner, 0 none; tone_frames counts frames into the Goertzel block. The filters see each error less the one a frame earlier at the same
+	// place: what repeats every frame (the FICH, a voice frame held, the errors a repeated symbol pattern leaves) is a
+	// comb at multiples of 10 Hz that the 2.5 Hz bins took for a tone (bench: 131.8 / 199.5 Hz on a direct signal
+	// with none); a tone is not periodic in the frame and stays. tone_prev_ok: tone_prev holds the previous frame's
+	bool tone_on, tone_prev_ok;
+	uint8_t tone_sel, tone_cand, tone_frames;
+	int8_t tone_prev[YSF_FRAME_SYMBOLS - 20];	// the data symbols' errors, halved
 	int32_t nx1, nx2, ny1, ny2;		// the notch's state
 	int32_t g_s1[C4FM_TONES], g_s2[C4FM_TONES];
 	int64_t g_acc[C4FM_TONES];		// tone power per block, leaky over about 4 blocks

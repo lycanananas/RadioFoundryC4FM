@@ -111,12 +111,28 @@ int main(int argc, char **argv)
 	c4fmDemodInit(&d, on_frame, on_lost, NULL);
 	c4fmDemodSetEq(&d, (uint8_t)eq_taps, (uint8_t)eq_step, (uint8_t)eq_mu);
 	c4fmDemodSetToneFilter(&d, tone != 0);
-	c4fmDemodFeed(&d, out, (uint32_t)n);
+	// Fed 100 ms at a time: the equalizer's center tap, lowest and highest seen while locked (its range in use)
+	double cmin = 99, cmax = -99;
+	for (size_t i = 0; i < n; i += 800) {
+		c4fmDemodFeed(&d, out + i, (uint32_t)(n - i < 800 ? n - i : 800));
+		if (d.locked && d.eq_taps != 0) {
+			double c = d.eq_w[d.eq_taps / 2u] / (double)(1 << 28);
+			cmin = c < cmin ? c : cmin;
+			cmax = c > cmax ? c : cmax;
+		}
+	}
 	unsigned good = fich_ok ? fich_ok : 1, cm = comms ? comms : 1;
 	printf("%s: %zu samples, %u frames (%u flywheel), fich ok %u, sync err avg %.2f, ber fich %.3f%%, ber vch %.3f%% "
 	       "(%u triplets fixed in %u voice frames), dch crc ok %u/%u\n", argv[1], n, frames, flywheels, fich_ok,
 	       frames ? (double)sync_err / frames : 0.0, 100.0 * fich_fec / (200.0 * good),
 	       100.0 * vch_fixed / (81.0 * 5 * cm), vch_fixed, 5 * comms, dch_ok, comms);
+	if (eq_taps != 0 && cmax > -99) {
+		printf("equalizer center tap %.3f..%.3f, at the end:", cmin, cmax);
+		for (unsigned k = 0; k < d.eq_taps; k++) {
+			printf(" %.3f", d.eq_w[k] / (double)(1 << 28));
+		}
+		printf("\n");
+	}
 	if (tone) {
 		printf("tone filter: %u.%u Hz\n", c4fmDemodTone(&d) / 10u, c4fmDemodTone(&d) % 10u);
 	}
