@@ -1554,8 +1554,8 @@ static char sim_names[UI_NAME_COUNT][17];
 static void sim_names_reset(void)
 {
 	strcpy(sim_names[UI_NAME_RADIO], "Q0TEST");
-	strcpy(sim_names[UI_NAME_BOOT1], "Q0TEST");
-	strcpy(sim_names[UI_NAME_BOOT2], "Jamie Thompson");
+	strcpy(sim_names[UI_NAME_BOOT1], "3Z2Z1");
+	strcpy(sim_names[UI_NAME_BOOT2], "Jan Pawel");
 }
 void ui_svc_name_get(uint8_t which, char out[17])
 {

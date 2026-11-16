@@ -761,67 +761,63 @@ void ui_draw_hint(const char *text, bool toast)
 
 // --- boot splash ---
 
-// The mark: a hexagon with a skyline behind a handheld radio, signal arcs either side of its antenna. It is drawn
-// per pixel from shapes laid out on a 1024 grid (hex radius 482, center 512,512), so it scales to every display class
-// with no bitmap. Six flat colors fit the 16-entry palette of a 4 bpp panel. On a 1 bpp panel the hexagon is solid ink
-// with the radio and arcs cut out of it, and a small mark has one arc a side, so the strokes stay a pixel or more
+// The mark: a pineapple (the C4FM fork's), a golden body with a diamond lattice under a crown of five leaves. It is
+// drawn per pixel from shapes laid out on a 1024 grid (the drawing spans 30..994 both ways), so it scales to every
+// display class with no bitmap. Five flat colors, so the boot screen stays within the 16-entry palette of a 4 bpp panel.
+// On a 1 bpp panel the pineapple is solid ink with a coarser lattice and the line between body and crown cut out; a
+// small one is the silhouette alone, so the strokes stay a pixel or more
 
-static const color_t ORANGE = RGB565(242, 96, 31), SKY = RGB565(203, 74, 24), CREAM = RGB565(255, 243, 220),
-	BROWN = RGB565(59, 23, 9), AMBER = RGB565(255, 179, 71), PEACH = RGB565(255, 217, 168);
+static const color_t GOLD = RGB565(255, 196, 44), SHADE = RGB565(226, 146, 28), LATTICE = RGB565(140, 84, 18),
+	LEAF = RGB565(96, 186, 72), LEAF_DARK = RGB565(44, 124, 50), AMBER = RGB565(255, 179, 71);
 
-static bool in_rrect(int px, int py, int x, int y, int w, int h, int r)
+// The body: an ellipse centered 512,690, 250 wide and 290 tall (half axes); scale 1000 = on its edge
+static int body_dist(int X, int Y, int cx, int rx)
 {
-	if (px < x || px >= x + w || py < y || py >= y + h)
-		return false;
-	int cx = px < x + r ? x + r : px >= x + w - r ? x + w - r - 1 : px;
-	int cy = py < y + r ? y + r : py >= y + h - r ? y + h - r - 1 : py;
-	return (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r;
+	long dx = X - cx, dy = Y - 690;
+	return (int)((dx * dx * 1000) / ((long)rx * rx) + (dy * dy * 1000) / (290L * 290L));
 }
 
-// The color at one point of the 1024 grid, or -1 outside the hexagon
+static bool in_tri(int px, int py, const short t[6])
+{
+	int d1 = (px - t[2]) * (t[1] - t[3]) - (t[0] - t[2]) * (py - t[3]);
+	int d2 = (px - t[4]) * (t[3] - t[5]) - (t[2] - t[4]) * (py - t[5]);
+	int d3 = (px - t[0]) * (t[5] - t[1]) - (t[4] - t[0]) * (py - t[1]);
+	bool neg = d1 < 0 || d2 < 0 || d3 < 0, pos = d1 > 0 || d2 > 0 || d3 > 0;
+	return !(neg && pos);
+}
+
+// The color at one point of the 1024 grid, or -1 outside the pineapple
 static int mark_color(int X, int Y, bool mono, bool small)
 {
 	color_t ink = ui_col.fg, paper = ui_col.bg;
-	int ax = X > 512 ? X - 512 : 512 - X, ay = Y > 512 ? Y - 512 : 512 - Y;
-	if (ay * 1000 + ax * 577 > 482000 || ax > 417)
-		return -1;
-	// Radio: antenna and side knob, body, display, speaker slits and the key
-	color_t body = mono ? paper : CREAM, det = mono ? ink : BROWN, scr = mono ? ink : AMBER;
-	if (in_rrect(X, Y, 434, 193, 37, 311, 18) || in_rrect(X, Y, 553, 441, 46, 74, 14) || in_rrect(X, Y, 397, 482, 230, 370, 46)) {
-		if (in_rrect(X, Y, 448, 532, 129, 63, 7))
-			return scr;
-		if (in_rrect(X, Y, 436, 519, 152, 89, 11))
-			return det;
-		for (int i = 0; i < 3; i++)
-			if (in_rrect(X, Y, 436, 652 + 37 * i, 152, 15, 7))
-				return det;
-		if ((X - 512) * (X - 512) + (Y - 800) * (Y - 800) <= 23 * 23)
-			return det;
-		return body;
+	int d = body_dist(X, Y, 512, 250);
+	if (d <= 1000) {
+		// lattice: two sets of diagonal stripes; coarser on a 1 bpp panel, none on a small one (a few pixels of
+		// stripes read as noise there: the silhouette alone)
+		int period = mono ? 170 : 120, line = mono ? 44 : 16;
+		int u = (X + Y) % period, v = (X - Y + 2048) % period;
+		if (!small && (u < line || v < line))
+			return mono ? paper : LATTICE;
+		if (mono)
+			return ink;
+		// the right side in shade: outside the same ellipse moved left
+		return body_dist(X, Y, 470, 240) > 1000 ? SHADE : GOLD;
 	}
-	// Signal arcs, within 42 degrees of horizontal either side of the antenna, centered 452,286
-	static const short ring[2][3][2] = { { { 76, 22 }, { 122, 20 }, { 168, 18 } }, { { 120, 60 }, { 0, 0 }, { 0, 0 } } };
-	int dx = X - 452, dy = Y - 286, d2 = dx * dx + dy * dy, ady = dy < 0 ? -dy : dy, adx = dx < 0 ? -dx : dx;
-	if (ady * 100 <= adx * 90) {
-		for (int i = 0; i < 3; i++) {
-			int r = ring[small][i][0], hw = ring[small][i][1] / 2;
-			if (r && d2 >= (r - hw) * (r - hw) && d2 <= (r + hw) * (r + hw))
-				return mono ? paper : PEACH;
-		}
-	}
-	if (mono)
-		return ink;
-	// Skyline: a sawtooth roof, two chimneys, in a darker orange than the hexagon
-	if (X >= 30 && X < 994) {
-		int roof = 490 - 120 * ((X - 30) % 241) / 241;
-		if (Y >= roof || (X >= 678 && X < 762 && Y >= 230 && Y < 260) || (X >= 690 && X < 750 && Y >= 250) ||
-		    (X >= 223 && X < 267 && Y >= 270))
-			return SKY;
-	}
-	return ORANGE;
+	// a paper line between body and crown on a 1 bpp panel
+	bool gap = mono && d <= (small ? 1300 : 1180);
+	// Crown: tips up, bases tucked behind the body's top; the middle leaf in front
+	static const short leaves[5][6] = {
+		{ 512, 40, 446, 470, 578, 470 },
+		{ 352, 112, 430, 470, 528, 440 }, { 672, 112, 496, 440, 594, 470 },
+		{ 222, 236, 414, 480, 494, 430 }, { 802, 236, 530, 430, 610, 480 },
+	};
+	for (int i = 0; i < 5; i++)
+		if (in_tri(X, Y, leaves[i]))
+			return gap ? paper : mono ? ink : (i == 1 || i == 2) ? LEAF_DARK : LEAF;
+	return -1;
 }
 
-// r = the hexagon's radius in pixels (the mark is 1.73 r wide and 2 r tall), centered on cx, cy
+// r = half the mark's height in pixels (it is about 1.2 r wide and 2 r tall), centered on cx, cy
 static void draw_mark(int cx, int cy, int r)
 {
 	bool mono = gfx_bpp() == 1, small = mono && r < 26;
@@ -834,12 +830,12 @@ static void draw_mark(int cx, int cy, int r)
 	}
 }
 
-// The wordmark: "Radio" in the accent color, "Foundry" in the text color, centered; returns its height
+// The wordmark: "C4FM" in the accent color, "Foundry" in the text color, centered; returns its height
 static int draw_wordmark(const font_t *f, int y)
 {
-	int w1 = gfx_text_width(f, "Radio") + 1, w = w1 + gfx_text_width(f, "Foundry");
+	int w1 = gfx_text_width(f, "C4FM") + 1, w = w1 + gfx_text_width(f, "Foundry");
 	int x = (gfx_width() - w) / 2;
-	gfx_text(f, x, y, "Radio", gfx_bpp() == 1 ? ui_col.fg : AMBER);
+	gfx_text(f, x, y, "C4FM", gfx_bpp() == 1 ? ui_col.fg : AMBER);
 	gfx_text(f, x + w1, y, "Foundry", ui_col.fg);
 	return f->h;
 }
@@ -850,7 +846,7 @@ void ui_draw_splash(const char *board_name, const char *version, const char *lin
 	const ui_layout_t *L = &ui_layout;
 	gfx_clear(ui_col.bg);
 
-	const char *word = "RadioFoundry";
+	const char *word = "C4FMFoundry";
 	const font_t *wf = gfx_text_width(L->large, word) <= w - 4 ? L->large :
 		gfx_text_width(L->medium, word) <= w - 4 ? L->medium : L->small;
 	// The owner's lines (the CPS boot text): as large as fits, never dropped
@@ -920,12 +916,12 @@ void ui_draw_splash(const char *board_name, const char *version, const char *lin
 		int sw = side_w, ww = gfx_text_width(wf, word);
 		int x0 = (w - sw - ww) / 2, row_h = 2 * side_r > wf->h ? 2 * side_r : wf->h;
 		draw_mark(x0 + (sw - 4) / 2, y + row_h / 2, side_r);
-		gfx_text(wf, x0 + sw, y + (row_h - wf->h) / 2, "Radio", gfx_bpp() == 1 ? ui_col.fg : AMBER);
-		gfx_text(wf, x0 + sw + gfx_text_width(wf, "Radio") + 1, y + (row_h - wf->h) / 2, "Foundry", ui_col.fg);
+		gfx_text(wf, x0 + sw, y + (row_h - wf->h) / 2, "C4FM", gfx_bpp() == 1 ? ui_col.fg : AMBER);
+		gfx_text(wf, x0 + sw + gfx_text_width(wf, "C4FM") + 1, y + (row_h - wf->h) / 2, "Foundry", ui_col.fg);
 		y += row_h;
 	} else
 		y += draw_wordmark(wf, y);
-	gfx_hline(w / 2 - w / 6, y + gap / 2, w / 3, gfx_bpp() == 1 ? ui_col.fg : ORANGE);
+	gfx_hline(w / 2 - w / 6, y + gap / 2, w / 3, gfx_bpp() == 1 ? ui_col.fg : GOLD);
 	y += gap;
 	if (n_lines > 0) {
 		y += gap;

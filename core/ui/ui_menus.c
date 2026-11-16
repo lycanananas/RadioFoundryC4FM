@@ -4773,14 +4773,14 @@ static uint16_t about_max;	// the largest first line (from the last draw)
 
 static const char *about_text(void)
 {
-	static char t[400];
+	static char t[640];
 	sbuf_t b;
 	sb_init(&b, t, sizeof t);
 	// every line "Label: value" (ui_draw_text_page shows labels dim), each on its own line: "RadioFoundry v26.11" was
 	// wider than the display and the release wrapped without its label. A release: its name, then the commit it was
 	// built from; any other build: the commit alone
 	sb_str(&b, TR("Firmware: "));
-	sb_str(&b, "RadioFoundry\n");
+	sb_str(&b, "C4FMFoundry\n");	// the C4FM fork of RadioFoundry
 	if (RFOUNDRY_RELEASE[0] != '\0') {
 		sb_str(&b, TR("Release: "));
 		sb_str(&b, RFOUNDRY_RELEASE);
@@ -4800,7 +4800,24 @@ static const char *about_text(void)
 	sb_str(&b, board.name);
 	sb_chr(&b, '\n');
 	sb_str(&b, TR("License: "));
+#if CONFIG_C4FM
+	// core/c4fm is GPL-2.0-or-later, so a build with it is too; the rest is RadioFoundry's MIT code
+	sb_str(&b, "GPL-2.0-or-later\n");
+	sb_str(&b, TR("Based on: "));
+	sb_str(&b, "RadioFoundry, MIT, (c) 2026 The RadioFoundry Authors\n");
+	// who made the C4FM mod, how, and the GPL projects its C4FM layer is modeled on
+	sb_str(&b, TR("C4FM mod: "));
+	sb_str(&b, "SQ5FOX\n");
+	sb_str(&b, TR("Made with: "));
+	sb_str(&b, "Claude (Anthropic)\n");
+	// so is RadioFoundry itself: its repository carries notes for coding agents (AGENTS.md, CLAUDE.md)
+	sb_str(&b, TR("Upstream: "));
+	sb_str(&b, "also made with AI agents\n");
+	sb_str(&b, TR("Modeled on: "));
+	sb_str(&b, "MMDVM, MMDVMHost, MMDVM_CM, YSFGateway (GPL-2.0)\n");
+#else
 	sb_str(&b, "MIT, (c) 2026 The RadioFoundry Authors\n");
+#endif
 	// one author per line, in AUTHORS order: a comma-joined list wraps mid-name on every display
 	sb_str(&b, RFOUNDRY_ABOUT_AUTHOR_COUNT > 1 ? TR("Authors:") : TR("Author:"));
 	for (unsigned i = 0; i < RFOUNDRY_ABOUT_AUTHOR_COUNT; i++) {
