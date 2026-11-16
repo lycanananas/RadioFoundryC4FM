@@ -23,7 +23,7 @@ The C4FM fork's radio mode: DN voice (V/D mode 2) beside FM, on one frequency. P
 | Identity | A callsign: the radio name's first word (`radio_cwid_callsign`), and a five-character radio ID from the chip's unique ID (`c4fm_radio_id`). No contacts, no talk groups |
 | Selector | DG-ID 0-99 (Settings > My radio > C4FM DG-ID). 00 sends with DG-ID 0 and hears every transmission |
 | Channels | a codeplug channel's mode byte 2 is C4FM, its DG-ID (0-99) in the color code byte; the VFO uses the DG-ID setting |
-| Not done | Wires-X control, GPS (DT1 / DT2), data FR mode, picture and text, repeater (Fusion link) features, the chip's own 4FSK demodulator |
+| Not done | GPS (DT1 / DT2), data FR mode, picture and text, repeater (Fusion link) features, the chip's own 4FSK demodulator |
 | License | `core/c4fm/*` and its tests are GPL-2.0-or-later: the layout facts come from MMDVMHost and MMDVM_CM. The rest of the change is MIT, but a build with `CONFIG_C4FM=y` is a GPL work, and none of it can go upstream (docs/CLEANROOM.md) |
 
 ## 2. Why the radio's DMR parts carry C4FM

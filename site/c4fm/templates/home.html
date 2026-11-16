@@ -1,0 +1,66 @@
+<section class="hero">
+	<div class="wrap hero-grid">
+		<div class="hero-text">
+			<h1>{{t home.headline}}</h1>
+			<p class="lead">{{t home.lead}}</p>
+			<div class="actions">
+				<a class="btn btn-primary" href="{{home}}flash/index.html">{{t home.cta_flash}}</a>
+				<a class="btn" href="{{home}}codeplug/index.html">{{t home.cta_codeplug}}</a>
+			</div>
+			<p class="small muted">{{t home.release}} <b>{{ release }}</b> ({{ git }}) · {{t home.codec}}</p>
+			<div class="notice"><p><strong>{{t home.poc_title}}</strong> {{t home.poc_text}}</p></div>
+		</div>
+		<figure class="hero-device">
+			<img src="{{root}}static/img/radios/{{ flagship_id }}.svg" alt="{{ flagship_name }}">
+		</figure>
+	</div>
+</section>
+
+<section class="wrap section">
+	<h2>{{t home.what_title}}</h2>
+	<dl class="feature-rows">
+		<div><dt>{{t home.f_voice}}</dt><dd>{{t home.f_voice_text}}</dd></div>
+		<div><dt>{{t home.f_id}}</dt><dd>{{t home.f_id_text}}</dd></div>
+		<div><dt>{{t home.f_channels}}</dt><dd>{{t home.f_channels_text}}</dd></div>
+		<div><dt>{{t home.f_modes}}</dt><dd>{{t home.f_modes_text}}</dd></div>
+		<div><dt>{{t home.f_wx}}</dt><dd>{{t home.f_wx_text}}</dd></div>
+		<div><dt>{{t home.f_rx}}</dt><dd>{{t home.f_rx_text}}</dd></div>
+	</dl>
+</section>
+
+<section class="wrap section">
+	<h2>{{t home.screens_title}}</h2>
+	<div class="c4fm-shots">
+		<figure><img src="{{root}}static/img/c4fm/menu.png" alt="{{t home.shot_menu}}" width="220" height="310"><figcaption class="small muted">{{t home.shot_menu}}</figcaption></figure>
+		<figure><img src="{{root}}static/img/c4fm/c4fm.png" alt="{{t home.shot_c4fm}}" width="220" height="310"><figcaption class="small muted">{{t home.shot_c4fm}}</figcaption></figure>
+		<figure><img src="{{root}}static/img/c4fm/fm.png" alt="{{t home.shot_fm}}" width="220" height="310"><figcaption class="small muted">{{t home.shot_fm}}</figcaption></figure>
+		<figure><img src="{{root}}static/img/c4fm/dmr.png" alt="{{t home.shot_dmr}}" width="220" height="310"><figcaption class="small muted">{{t home.shot_dmr}}</figcaption></figure>
+	</div>
+</section>
+
+<section class="wrap section">
+	<h2>{{t home.how_title}}</h2>
+	<ol class="c4fm-steps">
+		<li>{{t home.how_1}}</li>
+		<li>{{t home.how_2}}</li>
+		<li>{{t home.how_3}}</li>
+		<li>{{t home.how_4}}</li>
+	</ol>
+</section>
+
+<section class="wrap section">
+	<h2>{{t home.not_title}}</h2>
+	<ul>
+		<li>{{t home.not_1}}</li>
+		<li>{{t home.not_2}}</li>
+		<li>{{t home.not_3}}</li>
+	</ul>
+	<p class="small muted">{{t home.license}}</p>
+</section>
+
+<style>
+.c4fm-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--space-4); }
+.c4fm-shots figure { margin: 0; text-align: center; }
+.c4fm-shots img { width: 100%; height: auto; max-width: 220px; border-radius: var(--radius-sm); }
+.c4fm-steps li { margin-bottom: var(--space-2); }
+</style>

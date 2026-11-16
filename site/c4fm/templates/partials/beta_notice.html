@@ -1,0 +1,17 @@
+<dialog id="beta-notice" class="confirm beta-notice" aria-labelledby="beta-notice-title">
+	<h2 id="beta-notice-title" tabindex="-1" autofocus>{{t flash.beta.title}}</h2>
+	<p>{{t flash.beta.lead}}</p>
+	<h3>{{t flash.beta.risks_title}}</h3>
+	<ul>
+		<li>{{t flash.beta.risk_stop}}</li>
+		<li>{{t flash.beta.risk_codeplug}}</li>
+		<li>{{t flash.beta.risk_features}}</li>
+	</ul>
+	<div class="notice ok"><p><strong>{{t flash.beta.safe_title}}</strong> {{t flash.beta.safe_text}}</p></div>
+	<h3>{{t flash.beta.help_title}}</h3>
+	<p>{{t flash.beta.help_text}}</p>
+	<p class="beta-links"><a href="{{ repo }}/issues" target="_blank" rel="noopener">{{t flash.beta.help_github}}</a></p>
+	<form method="dialog" class="confirm-actions">
+		<button class="btn btn-primary" value="ok">{{t flash.beta.ok}}</button>
+	</form>
+</dialog>
