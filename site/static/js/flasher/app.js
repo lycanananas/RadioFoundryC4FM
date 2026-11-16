@@ -144,16 +144,19 @@ const initialState = () => ({
 });
 const S = initialState();
 
-// Custom builds and the flash log
-const API = "https://api.radiofoundry.org/v1/";
+// Custom builds and the flash log. A site without the build service (the page's #flasher data-api="", a fork's site)
+// installs the release images it carries (releases.json) and sends nothing anywhere: no flash log, no reports, no samples
+const API_ATTR = globalThis.document?.getElementById("flasher")?.dataset.api;
+const API = API_ATTR === undefined ? "https://api.radiofoundry.org/v1/" : API_ATTR || null;
 // minimal non-invasive reporting for helping the RadioFoundry project track programming failures; opt out with
 // ?reporting=0
-const FLASH_LOG = new URLSearchParams(location.search).get("reporting") !== "0";
+const FLASH_LOG = !!API && new URLSearchParams(location.search).get("reporting") !== "0";
 
 // A version link (/flash/?version=<tag, full commit hash or branch name>) builds that version instead of the latest release. The tab keeps
 // it for the session, so a reload or a visit to another page doesn't lose it; ?version= (empty) or the banner drops it.
 const VERSION_STORE = "rfoundry-flash-version";
 let VERSION_REF = (() => {
+	if (!API) return null;	// a version is built by the service
 	const q = new URLSearchParams(location.search).get("version");
 	const ref = q && /^[0-9A-Fa-f]+$/.test(q) ? q.toLowerCase() : q;
 	try {
@@ -215,7 +218,7 @@ async function api(method, path, body) {
 // from the radio. problem (explain.js): what went wrong; for a fault in the page its message goes with the user's note.
 // Not offered in a simulation
 function analysisOffer(cand, boardId, problem = null) {
-	if (!cand || S.sim) return null;
+	if (!cand || S.sim || !API) return null;
 	const internal = problem?.problem === "internal";
 	const dump = problem?.problem === "dump";
 	const status = h("p", { class: "small" });
@@ -910,7 +913,7 @@ async function connectForUpdate(status) {
 	S.decided = {};
 	planUpdate(S.current, S.selection, S.decided);
 	// a build the radio doesn't say: the build step, starting from the closest variant
-	S.editBuild = S.current.kind === "unknown";
+	S.editBuild = S.current.kind === "unknown" && !!API;
 	diag.note("update: radio", { board: p.board, git: p.git, build: S.current.kind, preset: S.current.preset || S.current.guess || null });
 }
 
@@ -942,7 +945,9 @@ function updateView() {
 		}
 		const p = S.now.probe, cur = S.current;
 		// the radio's own build, unless the build step has the selection (edits kept when the user comes back)
-		const plan = S.editBuild ? { preset: S.selection.matches(startCode), added: [], ask: [], ready: true } : planUpdate(cur, S.selection, S.decided);
+		const plan = S.editBuild ? { preset: S.selection.matches(startCode), added: [], ask: [], ready: true }
+			: !API ? { preset: releaseFor(S.radio)?.variant || null, added: [], ask: [], ready: true }	// the release, as it is
+			: planUpdate(cur, S.selection, S.decided);
 		// an image built for another selection no longer applies
 		if (S.firmware?.selection && S.firmware.selection !== selectionKey(S.selection)) S.firmware = null;
 		const vtitle = (id) => (t(`variant.${id}.title`) !== `variant.${id}.title` ? t(`variant.${id}.title`) : S.data.variants.find((v) => v.id === id)?.title || id);
@@ -973,8 +978,8 @@ function updateView() {
 			h("dl", { class: "kv-list" },
 				h("dt", {}, t("flash.update.radio")), h("dd", {}, S.radio.name),
 				h("dt", {}, t("flash.update.version")), h("dd", {}, t("flash.update.from_to", { from: firmwareName(p.version), to: updateVersion() })),
-				h("dt", {}, t("flash.update.build")), h("dd", {}, buildText, " ", cur.kind === "unknown" ? null : edit)),
-			cur.kind === "unknown" ? notice(t("flash.update.unknown_text", { variant: vtitle(cur.guess) }), "info") : null,
+				h("dt", {}, t("flash.update.build")), h("dd", {}, buildText, " ", cur.kind === "unknown" || !API ? null : edit)),
+			cur.kind === "unknown" && API ? notice(t("flash.update.unknown_text", { variant: vtitle(cur.guess) }), "info") : null,
 			S.editBuild ? null : asks, S.editBuild ? null : added, backup, backupPanel, image, status));
 		const busy = building && !S.build.error;
 		const go = async () => {
@@ -1047,7 +1052,8 @@ function selectRadio(r) {
 	S.radio = r;
 	S.board = fb().boards[r.flash.board];
 	S.selection = new Selection(r, S.data.features, S.data.variants);
-	S.selection.useVariant("full");
+	// without the build service the build is the release's, whatever variant it is
+	S.selection.useVariant(API ? "full" : releaseFor(r)?.variant || "full");
 	S.langAdded = null;
 	S.firmware = null;
 	S.buildOptions = {};
@@ -1059,6 +1065,7 @@ function selectRadio(r) {
 // install: the build (variant, a la carte)
 
 function buildView() {
+	if (!API) return releaseView();
 	const sel = S.selection;
 	const wrap = h("div", { class: "flasher" });
 	const vtitle = (v) => (t(`variant.${v.id}.title`) !== `variant.${v.id}.title` ? t(`variant.${v.id}.title`) : v.title);
@@ -1294,10 +1301,77 @@ function nest(items) {
 	return out;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// install without the build service: the release image the site carries
+
+// The newest release image for a radio (releases.json), or null
+const releaseFor = (r) => (r ? S.data.releases.filter((x) => x.board === r.id).at(-1) || null : null);
+
+async function loadRelease(redraw) {
+	const rel = releaseFor(S.radio);
+	S.build = { selection: "release", text: t("flash.release.loading") };
+	redraw();
+	try {
+		if (!rel) throw new Error(t("flash.release.none", { name: S.radio.name }));
+		const get = async (path) => {
+			const r = await fetch(`${ROOT}${path}`);
+			if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+			return r;
+		};
+		const [m, img] = await Promise.all([get(rel.manifest).then((r) => r.json()),
+			get(rel.image).then((r) => r.arrayBuffer()).then((x) => new Uint8Array(x))]);
+		const board = await verify(m, img, fb(), S.board.id);
+		S.firmware = { manifest: m, image: img, source: t("flash.release.image", { version: m.version }), origin: "release",
+			variant: m.variant || "full", board };
+		S.build = null;
+	} catch (e) {
+		diag.error("release image", e);
+		S.build.error = { text: t("flash.release.failed", { error: errorText(e) }), rec: diag.currentError() };
+	}
+	redraw();
+}
+
+// The build step without the service: what gets installed, and the user's own image instead
+function releaseView() {
+	const wrap = h("div", { class: "flasher" });
+	const draw = () => {
+		const rel = releaseFor(S.radio);
+		const v = rel && S.data.variants.find((x) => x.id === rel.variant);
+		const busy = S.build?.selection === "release" && !S.build.error;
+		const failed = S.build?.selection === "release" ? S.build.error : null;
+		const go = async () => {
+			if (!S.firmware && S.sim) await ensureFirmware();
+			if (!S.firmware && !S.sim) await loadRelease(draw);
+			if (S.firmware || S.sim) next();
+		};
+		S.forward(button(busy ? [spinner(), t("flash.release.loading")] : t(`flash.nav.to_${stepsFor()[S.step + 1]}`), go,
+			{ primary: true, disabled: busy || (!rel && !S.firmware && !S.sim) }));
+		const status = S.firmware ? notice(t("flash.build.image_ready", { what: S.firmware.source }), "ok")
+			: failed ? buildErrorNotice(failed)
+			: busy ? h("p", { class: "muted", role: "status" }, spinner(), S.build.text) : null;
+		wrap.replaceChildren(panel(t("flash.release.title"),
+			S.radio.status !== "supported" ? notice(t(S.radio.backup?.stock === "none" ? "flash.build.untested_keep_file" : "flash.build.untested", { name: S.radio.name }), "bad") : null,
+			rel ? h("dl", { class: "kv-list" },
+				h("dt", {}, t("flash.release.version")), h("dd", {}, rel.version, rel.git ? ` (${rel.git})` : ""),
+				h("dt", {}, t("flash.release.build")), h("dd", {}, v?.title || rel.variant),
+				v?.summary ? [h("dt", {}, ""), h("dd", { class: "small muted" }, v.summary)] : null,
+				h("dt", {}, t("flash.release.size")), h("dd", {}, `${Math.ceil(rel.size / 1024)} KB`))
+				: notice(t("flash.release.none", { name: S.radio.name }), "bad"),
+			status,
+			h("details", { class: "small" }, h("summary", {}, t("flash.release.own_title")),
+				h("p", {}, t("flash.release.own_text")),
+				filePicker(t("flash.build.own_image"), ".bin", (f) => loadOwnImage(f, draw)),
+				filePicker(t("flash.build.own_manifest"), ".json", async (f) => { S.ownManifest = JSON.parse(new TextDecoder().decode(f.data)); }))));
+	};
+	draw();
+	return wrap;
+}
+
 const selectionKey = (sel) => `${VERSION_REF || ""}:${sel.radio.id}:${JSON.stringify(S.buildOptions || {})}:${[...sel.on].sort().join(",")}`;
 
 // Ask the build API for the current selection, wait for it, and take the image like a release's
 async function requestBuild(redraw) {
+	if (!API) return loadRelease(redraw);
 	const sel = S.selection, key = selectionKey(sel);
 	const current = () => S.build?.selection === key && selectionKey(S.selection) === key;
 	S.build = { selection: key, text: t("flash.build.sending") };
@@ -3041,7 +3115,8 @@ function kitView(api) {
 
 async function main() {
 	showBetaNotice();	// before the data loads: the first thing a visitor reads, once per session
-	initReporting({ tool: "flasher", context: reportContext, attachments: reportAttachments, backend: { api: API, meta: reportMeta, practice: () => !!S.sim || SIM_HASH.test(location.hash) } });
+	initReporting({ tool: "flasher", context: reportContext, attachments: reportAttachments,
+		backend: API ? { api: API, meta: reportMeta, practice: () => !!S.sim || SIM_HASH.test(location.hash) } : undefined });
 	if (!FLASH_LOG) document.getElementById("flash-log-off")?.replaceWith(t("flash.log.is_off"));
 	// the privacy contact is put together here, so address scrapers don't find it in the page or the repository
 	const mail = ["tseuqer-ycavirp-rdo", "moc.relwofrecneps"].map((x) => [...x].reverse().join("")).join("@");
