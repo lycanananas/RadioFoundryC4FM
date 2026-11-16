@@ -167,3 +167,22 @@ test("unknown headers are listed, and a file of no table is refused", () => {
 	assert.equal(detect("Foo,Bar\n1,2\n"), null);
 	assert.throws(() => importTable(m, "Foo,Bar\n1,2\n"), { code: "not_a_table" });
 });
+
+test("C4FM channel: mode and DG-ID through channels.csv (the C4FM fork's)", () => {
+	const m = empty();
+	m.channels.push(newChannel({ name: "SR5WI", rxHz: 438900000, txHz: 431300000, mode: "c4fm", dgid: 42 }));
+	m.channels.push(newChannel({ name: "DMR", rxHz: 438500000, txHz: 438500000, mode: "dmr", colorCode: 7 }));
+	const text = exportTable(m, "channels");
+	const rows = parse(text);
+	const col = (h) => rows[0].indexOf(h);
+	assert.equal(rows[1][col("Mode")], "C4FM");
+	assert.equal(rows[1][col("DG-ID")], "42");
+	const n = empty();
+	const r = importTable(n, text);
+	assert.deepEqual(r.problems, []);
+	assert.equal(n.channels[0].mode, "c4fm");
+	assert.equal(n.channels[0].dgid, 42);
+	assert.equal(n.channels[1].mode, "dmr");
+	assert.equal(n.channels[1].colorCode, 7);
+	assert.deepEqual(encode(n).bytes, encode(m).bytes);
+});

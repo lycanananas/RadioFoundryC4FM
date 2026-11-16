@@ -145,7 +145,7 @@ const asWord = (words, dflt, lo, hi) => (s) => {
 
 const POWER = { ...POWER_NAMES };
 const powerText = (n) => POWER_NAMES[n] || String(n);
-const MODES = { fm: "FM", dmr: "DMR" };
+const MODES = { fm: "FM", dmr: "DMR", c4fm: "C4FM" };
 const TYPES = Object.fromEntries(CALL_TYPES.map((k) => [k, k[0].toUpperCase() + k.slice(1)]));
 
 // --- References by name ---
@@ -310,6 +310,7 @@ export const TABLES = {
 			c("Squelch", "squelch", asInt(0, 21, 0)),
 			c("Color Code", "colorCode", asInt(0, 15, 1), undefined, ["CC", "Colour Code"]),
 			c("Timeslot", "timeslot", asInt(1, 2, 1), undefined, ["TS", "Time Slot", "Slot"]),
+			c("DG-ID", "dgid", asInt(0, 99, 0), undefined, ["DGID", "DG ID"]),
 			ref("TX Contact", "contact", "contacts", ["Contact"]),
 			ref("RX Group List", "rxList", "rxLists", ["Group List", "RX List"]),
 			ref("APRS", "aprs", "aprs", ["APRS Configuration"]),

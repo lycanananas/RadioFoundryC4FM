@@ -414,6 +414,8 @@ export function exportQdmr(m) {
 		if (c.useLocation) note("location_rounded");
 		if (c.sfr || c.sfrA || c.sfrB) note("sfr");
 		if (c.toneBurst && c.mode !== "dmr") note("tone_burst");
+		// qdmr has no C4FM channel: an FM one on the same frequencies, the DG-ID lost (the C4FM fork's)
+		if (c.mode === "c4fm") note("c4fm");
 		const powerName = Object.keys(POWER).find((k) => POWER[k] === c.power);
 		if (c.power && !powerName) note("power_level");
 		const common = {

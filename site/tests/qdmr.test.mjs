@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 
 import { CodeplugImage, CODEPLUG_SPAN } from "../static/js/codeplug/image.js";
-import { decode, encode, empty } from "../static/js/codeplug/model.js";
+import { decode, encode, empty, newChannel } from "../static/js/codeplug/model.js";
 import { parse, stringify, flow, Tag, YamlError } from "../static/js/codeplug/yaml.js";
 import { importQdmr, exportQdmr, QdmrError, parseFrequency, parseDuration, fromLocator, toLocator } from "../static/js/codeplug/qdmr.js";
 import { convertersFor } from "../static/js/flasher/codeplug.js";
@@ -397,4 +397,16 @@ test("dmrconf encodes the exported YAML to the same channels, contacts, lists an
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+test("export: a C4FM channel is an FM one, with a note (the C4FM fork's)", () => {
+	const m = empty();
+	m.channels.push(newChannel({ name: "SR5WI", rxHz: 438900000, txHz: 431300000, mode: "c4fm", dgid: 42 }));
+	const { text, notes } = exportQdmr(m);
+	assert.deepEqual(notes.find((n) => n.code === "c4fm"), { code: "c4fm", n: 1 });
+	const m2 = empty();
+	importQdmr(m2, text);
+	assert.equal(m2.channels[0].mode, "fm");
+	assert.equal(m2.channels[0].rxHz, 438900000);
+	assert.equal(m2.channels[0].txHz, 431300000);
 });
